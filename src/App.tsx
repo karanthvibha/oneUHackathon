@@ -15,7 +15,16 @@ type Material = {
   isStudyMaterial: boolean
   file?: File
 }
-type PlanItem = { id: string; day: string; title: string; minutes: number; done: boolean; materialId?: number }
+type PlanItem = {
+  id: string
+  day: string
+  title: string
+  minutes: number
+  done: boolean
+  materialId?: number
+  date?: string
+  model?: string
+}
 
 const INBOX = 'inbox'
 const ALL = 'all'
@@ -45,6 +54,16 @@ const ALLOWED_FILE_EXTENSIONS = [
 const ALLOWED_FILE_TYPES = ALLOWED_FILE_EXTENSIONS.map((ext) => `.${ext}`)
 
 const TEXT_PREVIEW_EXTENSIONS = new Set(['txt', 'md', 'csv', 'rtf'])
+
+const WEEKDAY_ORDER: Record<string, number> = {
+  Mon: 0,
+  Tue: 1,
+  Wed: 2,
+  Thu: 3,
+  Fri: 4,
+  Sat: 5,
+  Sun: 6,
+}
 
 const navItems: { id: View; label: string; hint: string; icon: string }[] = [
   { id: 'tutor', label: 'AI Tutor', hint: 'Ask, quiz, explain', icon: '✦' },
@@ -361,6 +380,10 @@ function previewKind(name: string) {
   return TEXT_PREVIEW_EXTENSIONS.has(ext) ? 'text' : 'embed'
 }
 
+function stripExtension(name: string) {
+  return name.replace(/\.[^/.]+$/, '')
+}
+
 function toDateInputValue(iso: string) {
   const d = new Date(iso)
   const year = d.getFullYear()
@@ -375,6 +398,45 @@ function formatDate(iso: string) {
     month: 'short',
     day: 'numeric',
   })
+}
+
+function formatIsoDate(d: Date) {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatPlanDate(iso: string) {
+  const d = new Date(`${iso}T12:00:00`)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function formatWeekRange(start: Date, end: Date) {
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return `${fmt(start)} – ${fmt(end)}`
+}
+
+function buildQuizItemsForMaterial(material: Material): PlanItem[] {
+  const base = new Date(material.addedAt)
+  const occurrences = 8
+  const items: PlanItem[] = []
+  for (let i = 0; i < occurrences; i++) {
+    const date = new Date(base)
+    date.setDate(base.getDate() + 3 + i * 3)
+    items.push({
+      id: `quiz-${material.id}-${i}-${date.getTime()}`,
+      day: date.toLocaleDateString(undefined, { weekday: 'short' }),
+      title: `Quiz: ${stripExtension(material.name)}`,
+      minutes: 20,
+      done: false,
+      materialId: material.id,
+      date: formatIsoDate(date),
+      model: '',
+    })
+  }
+  return items
 }
 
 export default function App() {
@@ -455,7 +517,6 @@ export default function App() {
   const selectedCount = selectedIds.length
   const selectedMaterialCount = selectedMaterialIds.length
   const languageLabel = languages.find((l) => l.value === targetLanguage)?.label ?? ''
-  const doneCount = planItems.filter((p) => p.done).length
   const visibleMaterials = useMemo(() => {
     const q = materialQuery.trim().toLowerCase()
     return materials
@@ -470,6 +531,37 @@ export default function App() {
         )
       })
   }, [materials, materialFolder, materialQuery, materialFolders])
+
+  const weekRange = useMemo(() => {
+    const now = new Date()
+    const day = now.getDay()
+    const diffToMonday = (day + 6) % 7
+    const start = new Date(now)
+    start.setDate(now.getDate() - diffToMonday)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    end.setHours(23, 59, 59, 999)
+    return { start, end }
+  }, [])
+
+  const visiblePlanItems = useMemo(() => {
+    return [...planItems]
+      .filter((item) => {
+        if (!item.date) return true
+        const d = new Date(`${item.date}T12:00:00`)
+        return d >= weekRange.start && d <= weekRange.end
+      })
+      .sort((a, b) => {
+        const aOrder = WEEKDAY_ORDER[a.day] ?? 7
+        const bOrder = WEEKDAY_ORDER[b.day] ?? 7
+        if (aOrder !== bOrder) return aOrder - bOrder
+        if (a.date && b.date) return a.date.localeCompare(b.date)
+        return 0
+      })
+  }, [planItems, weekRange])
+
+  const doneCount = visiblePlanItems.filter((p) => p.done).length
 
   function sendTutor(event: FormEvent) {
     event.preventDefault()
@@ -646,9 +738,9 @@ export default function App() {
       setMaterials((prev) =>
         prev.map((m) => (selectedMaterialIds.includes(m.id) ? { ...m, isStudyMaterial: true } : m)),
       )
-      const newItems: PlanItem[] = targets.map((material) => {
+      const newItems: PlanItem[] = targets.flatMap((material) => {
         const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
-        return {
+        const review: PlanItem = {
           id: `plan-${material.id}`,
           day,
           title: material.name,
@@ -656,6 +748,7 @@ export default function App() {
           done: false,
           materialId: material.id,
         }
+        return [review, ...buildQuizItemsForMaterial(material)]
       })
       setPlanItems((prev) => [...newItems, ...prev])
     }
@@ -749,7 +842,7 @@ export default function App() {
         done: false,
         materialId: material.id,
       }
-      setPlanItems((prev) => [item, ...prev])
+      setPlanItems((prev) => [item, ...buildQuizItemsForMaterial(material), ...prev])
     }
   }
 
@@ -1115,24 +1208,30 @@ export default function App() {
               <div>
                 <p className="eyebrow">Study Plan</p>
                 <h1>This week, in order</h1>
+                <p className="week-range">
+                  {formatWeekRange(weekRange.start, weekRange.end)}
+                </p>
               </div>
               <p className="stat">
-                {doneCount} of {planItems.length} sessions done
+                {doneCount} of {visiblePlanItems.length} sessions done
                 <span>Keep Wednesday light if the quiz feels shaky.</span>
               </p>
             </header>
             <ol className="plan">
-              {planItems.map((item) => (
+              {visiblePlanItems.map((item) => (
                 <li key={item.id} className={item.done ? 'done' : undefined}>
                   <span className="day">{item.day}</span>
                   <div>
                     <strong>{item.title}</strong>
-                    <p>{item.minutes} min</p>
+                    <p>
+                      {item.minutes} min
+                      {item.date ? ` · ${formatPlanDate(item.date)}` : ''}
+                    </p>
                   </div>
                   <em>{item.done ? 'Done' : 'Up next'}</em>
                 </li>
               ))}
-              {planItems.length === 0 && <p className="empty">No study sessions planned yet.</p>}
+              {visiblePlanItems.length === 0 && <p className="empty">No study sessions planned yet.</p>}
             </ol>
           </section>
         )}
