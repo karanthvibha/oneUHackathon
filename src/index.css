@@ -1,0 +1,48 @@
+:root {
+  --ink: #1b2430;
+  --ink-soft: #2c3644;
+  --paper: #f6efe4;
+  --paper-2: #fffaf3;
+  --line: #e4d8c8;
+  --muted: #6d645a;
+  --coral: #e07a5f;
+  --coral-deep: #c45d44;
+  --sage: #3d6b5a;
+  --gold: #c9a227;
+  --shadow: 0 18px 50px rgba(27, 36, 48, 0.12);
+  font-family: Outfit, system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 500px at 90% -10%, #f3d9c4 0%, transparent 55%),
+    var(--paper);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
