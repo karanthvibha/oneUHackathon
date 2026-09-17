@@ -185,7 +185,7 @@ def evaluate_answer(question: str, correct_answer: str, student_answer: str) -> 
     Returns a dict matching the interaction-log schema: {"correct": bool, "feedback": str}.
     """
     system_prompt = (
-        "You are a warm, encouraging CS 2420 grader. "
+        "You are a warm, encouraging AI grader. "
         "You MUST always respond with STRICT, valid JSON and nothing else, in exactly "
         'this format: {"correct": true or false, "feedback": "short, kind explanation"}. '
         "Never include text outside the JSON, never leave a field out, and never fail to "
@@ -243,7 +243,7 @@ def generate_practice_question(concept: str, difficulty: str = "medium", languag
     context_text = "\n\n---\n\n".join(chunks) if chunks else "No specific course material found."
 
     system_prompt = (
-        "You are a CS 2420 tutor creating a practice question for a student. "
+        "You are an AI tutor creating a practice question for a student. "
         "You have course material below to ground the question in how this class "
         "teaches the concept, but you may also draw on general CS knowledge. "
         "\n\nRULES:\n"
@@ -297,8 +297,8 @@ Difficulty: {difficulty}"""
 # ---- INTERACTIVE CLI (for manual testing) ----
  
 if __name__ == "__main__":
-    print("=== Hi! I'm your CS 2420 AI Tutor. Ask me anything (type 'quit' to exit) ===")
-    print("(Type 'quiz <concept>' e.g. 'quiz me on BST' to get a practice question)\n")
+    print("=== Hi! I'm your AI Tutor. Ask me anything (type 'quit' to exit) ===")
+    print("(Type 'quiz on <concept>' to get a practice question)\n")
     conversation_history: list[dict] = []
     pending_question = None  # holds the active practice question while waiting for an answer
 
@@ -306,7 +306,7 @@ if __name__ == "__main__":
         prompt_text = "Your answer: " if pending_question is not None else "Ask a question: "
         user_input = input(prompt_text).strip()
         if user_input.lower() in ("quit", "exit", "q"):
-            print("Goodbye! Good luck with CS 2420!")
+            print("Goodbye! Good luck with studying!")
             break
         if not user_input:
             continue
@@ -339,6 +339,12 @@ if __name__ == "__main__":
 
             print(f"\nHere's a question about {concept}:\n")
             pending_question = generate_practice_question(concept)
+
+            if not pending_question.get("question_text"):
+                print("Sorry, I had trouble generating that question — try again or pick a different concept.\n")
+                pending_question = None
+                continue
+
             print(pending_question["question_text"])
             print("\n(Type your answer below)\n")
             continue
