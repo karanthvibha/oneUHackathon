@@ -44,6 +44,7 @@ const FOLDERS_STORE_KEY = 'lumen-folders'
 const MATERIAL_FOLDERS_STORE_KEY = 'lumen-material-folders'
 const MATERIALS_STORE_KEY = 'lumen-materials'
 const PLAN_STORE_KEY = 'lumen-plan'
+const COMPLETED_QUIZ_DATES_KEY = 'lumen-completed-quiz-dates'
 
 type PersistedMaterial = Omit<Material, 'file'>
 
@@ -366,6 +367,26 @@ function formatIsoDate(d: Date) {
   return `${year}-${month}-${day}`
 }
 
+function computeStreak(dates: string[]): number {
+  const completed = new Set(dates)
+  const cursor = new Date()
+  cursor.setHours(0, 0, 0, 0)
+
+  const has = (d: Date) => completed.has(formatIsoDate(d))
+
+  // If today isn't done yet, a streak stays alive through yesterday.
+  if (!has(cursor)) {
+    cursor.setDate(cursor.getDate() - 1)
+  }
+
+  let streak = 0
+  while (has(cursor)) {
+    streak += 1
+    cursor.setDate(cursor.getDate() - 1)
+  }
+  return streak
+}
+
 function formatRelative(iso: string) {
   const then = new Date(iso)
   const now = new Date()
@@ -428,6 +449,9 @@ export default function App() {
   const [materials, setMaterials] = useState<Material[]>(seedMaterials)
   const [materialsHydrated, setMaterialsHydrated] = useState(false)
   const [planItems, setPlanItems] = useState<PlanItem[]>(() => loadJSON(PLAN_STORE_KEY, seedPlanItems))
+  const [completedQuizDates, setCompletedQuizDates] = useState<string[]>(() =>
+    loadJSON(COMPLETED_QUIZ_DATES_KEY, [] as string[]),
+  )
   const [materialFolder, setMaterialFolder] = useState(ALL)
   const [materialFolderName, setMaterialFolderName] = useState('')
   const [showMaterialFolderForm, setShowMaterialFolderForm] = useState(false)
@@ -450,7 +474,7 @@ export default function App() {
   const [viewUrl, setViewUrl] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tutorName, setTutorName] = useState<string>(() => localStorage.getItem('tutor-name') ?? 'Tutor')
-  const [model, setModel] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
+  const [model] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
   const [quizFrequencyDays, setQuizFrequencyDays] = useState<number>(() => {
     const stored = Number(localStorage.getItem('tutor-quiz-frequency') ?? DEFAULT_QUIZ_FREQUENCY_DAYS)
     return Number.isFinite(stored) && stored >= 1
@@ -459,14 +483,34 @@ export default function App() {
   })
   const [showSettings, setShowSettings] = useState(false)
   const [nameDraft, setNameDraft] = useState(tutorName)
-  const [modelDraft, setModelDraft] = useState(model)
   const [frequencyDraft, setFrequencyDraft] = useState(quizFrequencyDays)
+  const [bedrockRegion, setBedrockRegion] = useState<string>(
+    () => localStorage.getItem('bedrock-region') ?? 'us-west-2',
+  )
+  const [bedrockAccessKeyId, setBedrockAccessKeyId] = useState<string>('')
+  const [bedrockSecretAccessKey, setBedrockSecretAccessKey] = useState<string>('')
+  const [bedrockSessionToken, setBedrockSessionToken] = useState<string>('')
+  const [bedrockModelId, setBedrockModelId] = useState<string>(
+    () => localStorage.getItem('bedrock-model-id') ?? '',
+  )
+  const [bedrockRegionDraft, setBedrockRegionDraft] = useState(bedrockRegion)
+  const [bedrockAccessKeyIdDraft, setBedrockAccessKeyIdDraft] = useState(bedrockAccessKeyId)
+  const [bedrockSecretAccessKeyDraft, setBedrockSecretAccessKeyDraft] = useState(bedrockSecretAccessKey)
+  const [bedrockSessionTokenDraft, setBedrockSessionTokenDraft] = useState(bedrockSessionToken)
+  const [bedrockModelIdDraft, setBedrockModelIdDraft] = useState(bedrockModelId)
   const [showTranslation, setShowTranslation] = useState<boolean>(
     () => localStorage.getItem('tutor-translate') === 'on',
   )
   const [targetLanguage, setTargetLanguage] = useState<string>(
     () => localStorage.getItem('tutor-lang') ?? 'es',
   )
+
+  // Credentials are not persisted; clear any legacy copies stored by older versions.
+  useEffect(() => {
+    localStorage.removeItem('bedrock-access-key-id')
+    localStorage.removeItem('bedrock-secret-access-key')
+    localStorage.removeItem('bedrock-session-token')
+  }, [])
 
   // Hydrate persisted file blobs into material metadata.
   useEffect(() => {
@@ -502,6 +546,10 @@ export default function App() {
   useEffect(() => {
     saveJSON(PLAN_STORE_KEY, planItems)
   }, [planItems])
+
+  useEffect(() => {
+    saveJSON(COMPLETED_QUIZ_DATES_KEY, completedQuizDates)
+  }, [completedQuizDates])
 
   useEffect(() => {
     if (!materialsHydrated) return
@@ -581,6 +629,8 @@ export default function App() {
   }, [planItems, weekRange])
 
   const doneCount = visiblePlanItems.filter((p) => p.done).length
+
+  const focusStreak = useMemo(() => computeStreak(completedQuizDates), [completedQuizDates])
 
   function sendTutor(event: FormEvent) {
     event.preventDefault()
@@ -669,8 +719,12 @@ export default function App() {
 
   function openSettings() {
     setNameDraft(tutorName)
-    setModelDraft(model)
     setFrequencyDraft(quizFrequencyDays)
+    setBedrockRegionDraft(bedrockRegion)
+    setBedrockAccessKeyIdDraft(bedrockAccessKeyId)
+    setBedrockSecretAccessKeyDraft(bedrockSecretAccessKey)
+    setBedrockSessionTokenDraft(bedrockSessionToken)
+    setBedrockModelIdDraft(bedrockModelId)
     setShowSettings(true)
   }
 
@@ -680,8 +734,6 @@ export default function App() {
     setTutorName(next)
     localStorage.setItem('tutor-name', next)
     setNameDraft(next)
-    setModel(modelDraft)
-    localStorage.setItem('tutor-model', modelDraft)
     const freq =
       Number.isFinite(frequencyDraft) && frequencyDraft >= 1
         ? Math.round(frequencyDraft)
@@ -689,6 +741,19 @@ export default function App() {
     setQuizFrequencyDays(freq)
     localStorage.setItem('tutor-quiz-frequency', String(freq))
     setFrequencyDraft(freq)
+
+    const nextRegion = bedrockRegionDraft.trim() || 'us-west-2'
+    setBedrockRegion(nextRegion)
+    localStorage.setItem('bedrock-region', nextRegion)
+    setBedrockRegionDraft(nextRegion)
+
+    // AWS credentials stay in memory only; they are never written to browser storage.
+    setBedrockAccessKeyId(bedrockAccessKeyIdDraft)
+    setBedrockSecretAccessKey(bedrockSecretAccessKeyDraft)
+    setBedrockSessionToken(bedrockSessionTokenDraft)
+    setBedrockModelId(bedrockModelIdDraft)
+    localStorage.setItem('bedrock-model-id', bedrockModelIdDraft)
+
     setShowSettings(false)
   }
 
@@ -883,6 +948,10 @@ export default function App() {
   function completePlanItem(item: PlanItem) {
     if (item.kind === 'quiz' && item.materialId != null) {
       const now = new Date()
+      const completedDate = formatIsoDate(now)
+      setCompletedQuizDates((prev) =>
+        prev.includes(completedDate) ? prev : [...prev, completedDate],
+      )
       const material = materials.find((m) => m.id === item.materialId)
       setMaterials((prev) =>
         prev.map((m) =>
@@ -1160,7 +1229,7 @@ export default function App() {
         <div className="sidebar-foot">
           <div className="streak">
             <p>Focus streak</p>
-            <strong>6 days</strong>
+            <strong>{focusStreak} {focusStreak === 1 ? 'day' : 'days'}</strong>
           </div>
 
           <div className="settings-wrap">
@@ -1183,18 +1252,6 @@ export default function App() {
                   onChange={(e) => setNameDraft(e.target.value)}
                   placeholder="Tutor"
                 />
-                <label htmlFor="tutor-model">Model</label>
-                <select
-                  id="tutor-model"
-                  value={modelDraft}
-                  onChange={(e) => setModelDraft(e.target.value)}
-                >
-                  {modelOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
                 <label htmlFor="tutor-quiz-frequency">Quiz frequency (days)</label>
                 <input
                   id="tutor-quiz-frequency"
@@ -1204,6 +1261,54 @@ export default function App() {
                   value={frequencyDraft}
                   onChange={(e) => setFrequencyDraft(Number(e.target.value))}
                 />
+
+                <p className="settings-section">Amazon Bedrock</p>
+                <label htmlFor="bedrock-region">Region</label>
+                <input
+                  id="bedrock-region"
+                  value={bedrockRegionDraft}
+                  onChange={(e) => setBedrockRegionDraft(e.target.value)}
+                  placeholder="us-west-2"
+                />
+                <label htmlFor="bedrock-access-key-id">Access key ID</label>
+                <input
+                  id="bedrock-access-key-id"
+                  value={bedrockAccessKeyIdDraft}
+                  onChange={(e) => setBedrockAccessKeyIdDraft(e.target.value)}
+                  placeholder="AKIA…"
+                  autoComplete="off"
+                />
+                <label htmlFor="bedrock-secret-access-key">Secret access key</label>
+                <input
+                  id="bedrock-secret-access-key"
+                  type="password"
+                  value={bedrockSecretAccessKeyDraft}
+                  onChange={(e) => setBedrockSecretAccessKeyDraft(e.target.value)}
+                  placeholder="Enter your secret access key"
+                  autoComplete="off"
+                />
+                <label htmlFor="bedrock-session-token">Session token (optional)</label>
+                <input
+                  id="bedrock-session-token"
+                  type="password"
+                  value={bedrockSessionTokenDraft}
+                  onChange={(e) => setBedrockSessionTokenDraft(e.target.value)}
+                  placeholder="For temporary credentials"
+                  autoComplete="off"
+                />
+                <label htmlFor="bedrock-model-id">Model ID</label>
+                <input
+                  id="bedrock-model-id"
+                  value={bedrockModelIdDraft}
+                  onChange={(e) => setBedrockModelIdDraft(e.target.value)}
+                  placeholder="anthropic.claude-3-5-sonnet-20241022-v2:0"
+                />
+                <p className="settings-note">
+                  AWS credentials are kept in memory for this session only and are never saved to
+                  your browser. For persistent, secure storage, connect a backend (e.g. AWS Secrets
+                  Manager) instead of using secrets in the browser.
+                </p>
+
                 <div className="settings-actions">
                   <button
                     className="btn btn-ghost"
@@ -1393,9 +1498,18 @@ export default function App() {
                       placeholder="New folder name"
                       aria-label="New material folder name"
                     />
-                    <button className="btn btn-primary" type="submit">
-                      Create folder
-                    </button>
+                    <div className="folder-create-actions">
+                      <button className="btn btn-primary" type="submit">
+                        Create folder
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={() => setShowMaterialFolderForm(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </form>
                 ) : (
                   <button
@@ -1678,9 +1792,18 @@ export default function App() {
                         placeholder="New folder name"
                         aria-label="New folder name"
                       />
-                      <button className="btn btn-primary" type="submit">
-                        Create folder
-                      </button>
+                      <div className="folder-create-actions">
+                        <button className="btn btn-primary" type="submit">
+                          Create folder
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          type="button"
+                          onClick={() => setShowFolderForm(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </form>
                   ) : (
                     <button

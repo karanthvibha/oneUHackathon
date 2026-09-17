@@ -249,6 +249,29 @@ h1 {
   font-size: 0.9rem;
 }
 
+.settings-section {
+  margin: 8px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.settings-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.settings-pop {
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;
@@ -916,6 +939,17 @@ textarea {
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
+}
+
+.folder-create-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.folder-create-actions .btn {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 0.88rem;
 }
 
 .folder-toggle {
