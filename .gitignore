@@ -13,4 +13,5 @@ env/
 
 # Secrets — never commit credentials
 .env
+.env.swp
 backend/.env
