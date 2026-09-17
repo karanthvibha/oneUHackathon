@@ -13,11 +13,38 @@ type Material = {
   folderId: string
   addedAt: string
   isStudyMaterial: boolean
+  file?: File
 }
 type PlanItem = { id: string; day: string; title: string; minutes: number; done: boolean; materialId?: number }
 
 const INBOX = 'inbox'
 const ALL = 'all'
+
+const ALLOWED_FILE_EXTENSIONS = [
+  'pdf',
+  'ppt',
+  'pptx',
+  'key',
+  'doc',
+  'docx',
+  'pages',
+  'txt',
+  'md',
+  'rtf',
+  'csv',
+  'xls',
+  'xlsx',
+  'odt',
+  'ods',
+  'odp',
+  'html',
+  'htm',
+  'epub',
+]
+
+const ALLOWED_FILE_TYPES = ALLOWED_FILE_EXTENSIONS.map((ext) => `.${ext}`)
+
+const TEXT_PREVIEW_EXTENSIONS = new Set(['txt', 'md', 'csv', 'rtf'])
 
 const navItems: { id: View; label: string; hint: string; icon: string }[] = [
   { id: 'tutor', label: 'AI Tutor', hint: 'Ask, quiz, explain', icon: '✦' },
@@ -324,11 +351,29 @@ function typeFromFileName(name: string) {
   return 'Other'
 }
 
+function isAllowedFile(name: string) {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return ALLOWED_FILE_EXTENSIONS.includes(ext)
+}
+
+function previewKind(name: string) {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return TEXT_PREVIEW_EXTENSIONS.has(ext) ? 'text' : 'embed'
+}
+
+function toDateInputValue(iso: string) {
+  const d = new Date(iso)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
   })
 }
 
@@ -364,6 +409,20 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
   const [showCapture, setShowCapture] = useState(false)
+  const [materialQuery, setMaterialQuery] = useState('')
+  const [draggedNoteId, setDraggedNoteId] = useState<number | null>(null)
+  const [draggedMaterialId, setDraggedMaterialId] = useState<number | null>(null)
+  const [noteDropFolder, setNoteDropFolder] = useState<string | null>(null)
+  const [materialDropFolder, setMaterialDropFolder] = useState<string | null>(null)
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<number[]>([])
+  const [materialMoveTarget, setMaterialMoveTarget] = useState(INBOX)
+  const [materialMenuId, setMaterialMenuId] = useState<number | null>(null)
+  const [uploadDate, setUploadDate] = useState('')
+  const [editingDateId, setEditingDateId] = useState<number | null>(null)
+  const [uploadError, setUploadError] = useState('')
+  const [viewingMaterial, setViewingMaterial] = useState<Material | null>(null)
+  const [viewText, setViewText] = useState('')
+  const [viewUrl, setViewUrl] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tutorName, setTutorName] = useState<string>(() => localStorage.getItem('tutor-name') ?? 'Tutor')
   const [model, setModel] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
@@ -394,10 +453,23 @@ export default function App() {
 
   const editingNote = notes.find((n) => n.id === editingId) ?? null
   const selectedCount = selectedIds.length
+  const selectedMaterialCount = selectedMaterialIds.length
   const languageLabel = languages.find((l) => l.value === targetLanguage)?.label ?? ''
   const doneCount = planItems.filter((p) => p.done).length
-  const visibleMaterials =
-    materialFolder === ALL ? materials : materials.filter((m) => m.folderId === materialFolder)
+  const visibleMaterials = useMemo(() => {
+    const q = materialQuery.trim().toLowerCase()
+    return materials
+      .filter((m) => materialFolder === ALL || m.folderId === materialFolder)
+      .filter((m) => {
+        if (!q) return true
+        const folder = materialFolders.find((f) => f.id === m.folderId)?.name ?? ''
+        return (
+          m.name.toLowerCase().includes(q) ||
+          m.type.toLowerCase().includes(q) ||
+          folder.toLowerCase().includes(q)
+        )
+      })
+  }, [materials, materialFolder, materialQuery, materialFolders])
 
   function sendTutor(event: FormEvent) {
     event.preventDefault()
@@ -528,6 +600,66 @@ export default function App() {
 
   function deleteMaterial(id: number) {
     setMaterials((prev) => prev.filter((m) => m.id !== id))
+    setSelectedMaterialIds((prev) => prev.filter((n) => n !== id))
+    setMaterialMenuId(null)
+  }
+
+  function updateMaterialDate(id: number, value: string) {
+    if (!value) return
+    const iso = new Date(`${value}T12:00:00`).toISOString()
+    setMaterials((prev) => prev.map((m) => (m.id === id ? { ...m, addedAt: iso } : m)))
+  }
+
+  function toggleMaterialSelected(id: number) {
+    setSelectedMaterialIds((prev) => (prev.includes(id) ? prev.filter((n) => n !== id) : [...prev, id]))
+  }
+
+  function toggleMaterialSelectAll() {
+    const ids = visibleMaterials.map((m) => m.id)
+    const allOn = ids.length > 0 && ids.every((id) => selectedMaterialIds.includes(id))
+    setSelectedMaterialIds(
+      allOn
+        ? selectedMaterialIds.filter((id) => !ids.includes(id))
+        : [...new Set([...selectedMaterialIds, ...ids])],
+    )
+  }
+
+  function deleteSelectedMaterials() {
+    setMaterials((prev) => prev.filter((m) => !selectedMaterialIds.includes(m.id)))
+    setSelectedMaterialIds([])
+  }
+
+  function moveSelectedMaterials() {
+    setMaterials((prev) =>
+      prev.map((m) =>
+        selectedMaterialIds.includes(m.id) ? { ...m, folderId: materialMoveTarget } : m,
+      ),
+    )
+    setSelectedMaterialIds([])
+  }
+
+  function addSelectedMaterialsToStudyPlan() {
+    const targets = materials.filter(
+      (m) => selectedMaterialIds.includes(m.id) && !m.isStudyMaterial,
+    )
+    if (targets.length > 0) {
+      setMaterials((prev) =>
+        prev.map((m) => (selectedMaterialIds.includes(m.id) ? { ...m, isStudyMaterial: true } : m)),
+      )
+      const newItems: PlanItem[] = targets.map((material) => {
+        const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
+        return {
+          id: `plan-${material.id}`,
+          day,
+          title: material.name,
+          minutes: 30,
+          done: false,
+          materialId: material.id,
+        }
+      })
+      setPlanItems((prev) => [...newItems, ...prev])
+    }
+    setSelectedMaterialIds([])
   }
 
   function createMaterialFolder(event: FormEvent) {
@@ -543,16 +675,59 @@ export default function App() {
 
   function handleFiles(files: FileList | File[]) {
     const folderId = materialFolder === ALL ? INBOX : materialFolder
-    const newMaterials: Material[] = Array.from(files).map((file) => ({
-      id: Date.now() + Math.round(Math.random() * 1000),
-      name: file.name,
-      type: typeFromFileName(file.name),
-      folderId,
-      addedAt: new Date().toISOString(),
-      isStudyMaterial: false,
-    }))
-    setMaterials((prev) => [...newMaterials, ...prev])
-    setShowUpload(false)
+    const allowed: File[] = []
+    const rejected: string[] = []
+    Array.from(files).forEach((file) => {
+      if (isAllowedFile(file.name)) allowed.push(file)
+      else rejected.push(file.name)
+    })
+
+    const addedAt = uploadDate
+      ? new Date(`${uploadDate}T12:00:00`).toISOString()
+      : new Date().toISOString()
+
+    if (allowed.length > 0) {
+      const newMaterials: Material[] = allowed.map((file) => ({
+        id: Date.now() + Math.round(Math.random() * 1000),
+        name: file.name,
+        type: typeFromFileName(file.name),
+        folderId,
+        addedAt,
+        isStudyMaterial: false,
+        file,
+      }))
+      setMaterials((prev) => [...newMaterials, ...prev])
+      setUploadDate('')
+    }
+
+    if (rejected.length > 0) {
+      setUploadError(`Skipped unsupported file(s): ${rejected.join(', ')}`)
+    } else {
+      setUploadError('')
+      setShowUpload(false)
+    }
+  }
+
+  function clearDragImage(event: DragEvent) {
+    const img = new Image()
+    img.src =
+      'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+    event.dataTransfer.setDragImage(img, 0, 0)
+  }
+
+  function dropOnFolder(event: DragEvent, folderId: string, kind: 'note' | 'material') {
+    event.preventDefault()
+    if (kind === 'note') {
+      if (draggedNoteId == null) return
+      setNotes((prev) => prev.map((n) => (n.id === draggedNoteId ? { ...n, folderId } : n)))
+      setDraggedNoteId(null)
+      setNoteDropFolder(null)
+    } else {
+      if (draggedMaterialId == null) return
+      setMaterials((prev) => prev.map((m) => (m.id === draggedMaterialId ? { ...m, folderId } : m)))
+      setDraggedMaterialId(null)
+      setMaterialDropFolder(null)
+    }
   }
 
   function toggleStudyMaterial(material: Material) {
@@ -576,6 +751,116 @@ export default function App() {
       }
       setPlanItems((prev) => [item, ...prev])
     }
+  }
+
+  function openMaterialViewer(material: Material) {
+    setMaterialMenuId(null)
+    setViewingMaterial(material)
+    if (!material.file) {
+      setViewUrl('')
+      setViewText('This sample file has no stored source to preview.')
+      return
+    }
+    if (previewKind(material.name) === 'text') {
+      material.file
+        .text()
+        .then((text) => {
+          setViewUrl('')
+          setViewText(text)
+        })
+        .catch(() => {
+          setViewUrl('')
+          setViewText('This file could not be read as text.')
+        })
+    } else {
+      setViewText('')
+      setViewUrl(URL.createObjectURL(material.file))
+    }
+  }
+
+  function closeMaterialViewer() {
+    if (viewUrl) URL.revokeObjectURL(viewUrl)
+    setViewingMaterial(null)
+    setViewText('')
+    setViewUrl('')
+    setShowCapture(false)
+  }
+
+  function MaterialViewerModal() {
+    if (!viewingMaterial) return null
+    return (
+      <div className="modal-backdrop" role="presentation" onClick={closeMaterialViewer}>
+        <div
+          className="modal viewer-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview ${viewingMaterial.name}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="modal-head">
+            <h2>{viewingMaterial.name}</h2>
+            <button
+              className="modal-close"
+              type="button"
+              aria-label="Close"
+              onClick={closeMaterialViewer}
+            >
+              ×
+            </button>
+          </div>
+          {viewUrl ? (
+            <iframe className="viewer-frame" title={viewingMaterial.name} src={viewUrl} />
+          ) : (
+            <pre className="viewer-text">{viewText || 'No preview available.'}</pre>
+          )}
+          <CaptureButton />
+        </div>
+      </div>
+    )
+  }
+
+  function CaptureButton() {
+    return (
+      <div className="capture-fab-wrap">
+        <button
+          className={`capture-fab${showCapture ? ' open' : ''}`}
+          type="button"
+          aria-expanded={showCapture}
+          onClick={() => setShowCapture((prev) => !prev)}
+        >
+          <span aria-hidden>✎</span>
+          Save to Smart Notes
+        </button>
+        {showCapture && (
+          <form className="capture capture-pop" onSubmit={addFromTutor}>
+            <div className="capture-head">
+              <label htmlFor="capture">Save a clip to Smart Notes</label>
+              <button
+                className="modal-close"
+                type="button"
+                aria-label="Close"
+                onClick={() => setShowCapture(false)}
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              id="capture"
+              value={capture}
+              onChange={(e) => setCapture(e.target.value)}
+              placeholder="Paste or write something worth keeping…"
+              rows={4}
+            />
+            <div className="capture-row">
+              <button className="btn btn-primary" type="submit">
+                Add to smart notes
+              </button>
+              {captureStatus && <p className="status">{captureStatus}</p>}
+            </div>
+          </form>
+        )}
+      </div>
+    )
   }
 
   function MaterialUploadModal() {
@@ -622,6 +907,7 @@ export default function App() {
             <input
               ref={fileInputRef}
               type="file"
+              accept={ALLOWED_FILE_TYPES.join(',')}
               multiple
               hidden
               onChange={(e) => {
@@ -631,6 +917,17 @@ export default function App() {
                 e.target.value = ''
               }}
             />
+          </div>
+          <div className="upload-date">
+            <label htmlFor="upload-date">Date introduced</label>
+            <input
+              id="upload-date"
+              type="date"
+              value={uploadDate}
+              onChange={(e) => setUploadDate(e.target.value)}
+            />
+            <p className="upload-date-hint">Leave blank to use today’s date.</p>
+            {uploadError && <p className="upload-error">{uploadError}</p>}
           </div>
         </div>
       </div>
@@ -742,44 +1039,46 @@ export default function App() {
 
       <main className="main">
         {view === 'tutor' && (
-          <section className="panel">
+          <section className="panel tutor-panel">
             <header className="panel-head">
               <div>
                 <p className="eyebrow">AI Tutor</p>
                 <h1>Ask anything you’re studying</h1>
               </div>
-              <p className="stat">
-                {model}
-                <span>Active tutor model</span>
-              </p>
+              <div className="head-side">
+                <p className="stat">
+                  {model}
+                  <span>Active tutor model</span>
+                </p>
+                <div className="tutor-tools">
+                  <button
+                    className={`toggle${showTranslation ? ' on' : ''}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={showTranslation}
+                    onClick={toggleTranslation}
+                  >
+                    <span className="toggle-track" aria-hidden>
+                      <span className="toggle-thumb" />
+                    </span>
+                    Translate
+                  </button>
+                  {showTranslation && (
+                    <select
+                      value={targetLanguage}
+                      onChange={(e) => updateLanguage(e.target.value)}
+                      aria-label="Translation language"
+                    >
+                      {languages.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
             </header>
-            <div className="tutor-tools">
-              <button
-                className={`toggle${showTranslation ? ' on' : ''}`}
-                type="button"
-                role="switch"
-                aria-checked={showTranslation}
-                onClick={toggleTranslation}
-              >
-                <span className="toggle-track" aria-hidden>
-                  <span className="toggle-thumb" />
-                </span>
-                Translate
-              </button>
-              {showTranslation && (
-                <select
-                  value={targetLanguage}
-                  onChange={(e) => updateLanguage(e.target.value)}
-                  aria-label="Translation language"
-                >
-                  {languages.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
             <div className={`chat-layout${showTranslation ? ' split' : ''}`}>
               <div className="chat-col">
                 {showTranslation && <p className="chat-col-label">Original</p>}
@@ -807,45 +1106,6 @@ export default function App() {
                 Send
               </button>
             </form>
-            <div className="capture-fab-wrap">
-              <button
-                className={`capture-fab${showCapture ? ' open' : ''}`}
-                type="button"
-                aria-expanded={showCapture}
-                onClick={() => setShowCapture((prev) => !prev)}
-              >
-                <span aria-hidden>✎</span>
-                Save to Smart Notes
-              </button>
-              {showCapture && (
-                <form className="capture capture-pop" onSubmit={addFromTutor}>
-                  <div className="capture-head">
-                    <label htmlFor="capture">Save a clip to Smart Notes</label>
-                    <button
-                      className="modal-close"
-                      type="button"
-                      aria-label="Close"
-                      onClick={() => setShowCapture(false)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <textarea
-                    id="capture"
-                    value={capture}
-                    onChange={(e) => setCapture(e.target.value)}
-                    placeholder="Paste or write something worth keeping…"
-                    rows={4}
-                  />
-                  <div className="capture-row">
-                    <button className="btn btn-primary" type="submit">
-                      Add to smart notes
-                    </button>
-                    {captureStatus && <p className="status">{captureStatus}</p>}
-                  </div>
-                </form>
-              )}
-            </div>
           </section>
         )}
 
@@ -900,8 +1160,14 @@ export default function App() {
                   <button
                     key={folder.id}
                     type="button"
-                    className={materialFolder === folder.id ? 'folder active' : 'folder'}
+                    className={`folder${materialFolder === folder.id ? ' active' : ''}${materialDropFolder === folder.id ? ' drop-over' : ''}`}
                     onClick={() => setMaterialFolder(folder.id)}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      setMaterialDropFolder(folder.id)
+                    }}
+                    onDragLeave={() => setMaterialDropFolder(null)}
+                    onDrop={(e) => dropOnFolder(e, folder.id, 'material')}
                   >
                     {folder.name}
                     <em>{materials.filter((m) => m.folderId === folder.id).length}</em>
@@ -932,35 +1198,180 @@ export default function App() {
 
               <div className="materials-main">
                 <div className="materials-toolbar">
-                  <button className="btn btn-primary" type="button" onClick={() => setShowUpload(true)}>
+                  <label className="check select-all">
+                    <input
+                      type="checkbox"
+                      checked={visibleMaterials.length > 0 && visibleMaterials.every((m) => selectedMaterialIds.includes(m.id))}
+                      onChange={toggleMaterialSelectAll}
+                    />
+                    Select all
+                  </label>
+                  <input
+                    value={materialQuery}
+                    onChange={(e) => setMaterialQuery(e.target.value)}
+                    placeholder="Search files"
+                    aria-label="Search files"
+                  />
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() => {
+                      setUploadError('')
+                      setShowUpload(true)
+                    }}
+                  >
                     Add file
                   </button>
                 </div>
 
+                {selectedMaterialCount > 0 && (
+                  <div className="bulk-bar">
+                    <span>{selectedMaterialCount} selected</span>
+                    <select
+                      value={materialMoveTarget}
+                      onChange={(e) => setMaterialMoveTarget(e.target.value)}
+                      aria-label="Move selected files to folder"
+                      disabled={selectedMaterialCount === 0}
+                    >
+                      {materialFolders.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      disabled={selectedMaterialCount === 0}
+                      onClick={addSelectedMaterialsToStudyPlan}
+                    >
+                      Add to study plan
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      disabled={selectedMaterialCount === 0}
+                      onClick={moveSelectedMaterials}
+                    >
+                      Move to folder
+                    </button>
+                    <button
+                      className="btn btn-danger"
+                      type="button"
+                      disabled={selectedMaterialCount === 0}
+                      onClick={deleteSelectedMaterials}
+                    >
+                      Delete selected
+                    </button>
+                  </div>
+                )}
+
                 <div className="materials">
                   {visibleMaterials.map((material) => (
-                    <article key={material.id} className="material">
+                    <article
+                      key={material.id}
+                      className={selectedMaterialIds.includes(material.id) ? 'material selected' : 'material'}
+                      draggable
+                      onDragStart={(e) => {
+                        clearDragImage(e)
+                        setDraggedMaterialId(material.id)
+                      }}
+                      onDragEnd={() => setDraggedMaterialId(null)}
+                    >
                       <div className="material-top">
+                        <label className="check" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selectedMaterialIds.includes(material.id)}
+                            onChange={() => toggleMaterialSelected(material.id)}
+                            aria-label={`Select ${material.name}`}
+                          />
+                        </label>
                         <span>{material.type}</span>
-                        <button
-                          className="icon-btn"
-                          type="button"
-                          aria-label={`Delete ${material.name}`}
-                          onClick={() => deleteMaterial(material.id)}
-                        >
-                          Delete
-                        </button>
+                        {material.isStudyMaterial && (
+                          <span className="study-symbol" title="In study plan" aria-label="In study plan">
+                            ★
+                          </span>
+                        )}
+                        <div className="material-menu-wrap">
+                          <button
+                            className="icon-btn material-menu-btn"
+                            type="button"
+                            aria-label={`Actions for ${material.name}`}
+                            aria-expanded={materialMenuId === material.id}
+                            onClick={() => setMaterialMenuId(materialMenuId === material.id ? null : material.id)}
+                          >
+                            ⋯
+                          </button>
+                          {materialMenuId === material.id && (
+                            <div className="material-menu">
+                              <button
+                                type="button"
+                                onClick={() => openMaterialViewer(material)}
+                              >
+                                <span aria-hidden>↗</span>
+                                Open file
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  toggleStudyMaterial(material)
+                                  setMaterialMenuId(null)
+                                }}
+                              >
+                                <span aria-hidden>{material.isStudyMaterial ? '★' : '☆'}</span>
+                                {material.isStudyMaterial ? 'In study plan' : 'Add to study plan'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingDateId(material.id)
+                                  setMaterialMenuId(null)
+                                }}
+                              >
+                                <span aria-hidden>📅</span>
+                                Change date introduced
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => deleteMaterial(material.id)}
+                              >
+                                <span aria-hidden>🗑</span>
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <h2>{material.name}</h2>
+                      <h2>
+                        <button
+                          className="material-open-btn"
+                          type="button"
+                          onClick={() => openMaterialViewer(material)}
+                        >
+                          {material.name}
+                        </button>
+                      </h2>
                       <p>{materialFolderNameFor(material.folderId)}</p>
-                      <p className="material-meta">Added {formatDate(material.addedAt)}</p>
-                      <button
-                        className={`btn material-study-toggle ${material.isStudyMaterial ? 'study-on' : 'btn-ghost'}`}
-                        type="button"
-                        onClick={() => toggleStudyMaterial(material)}
-                      >
-                        {material.isStudyMaterial ? 'In study plan' : 'Add to study plan'}
-                      </button>
+                      {editingDateId === material.id ? (
+                        <label className="material-date">
+                          <span>Date introduced</span>
+                          <input
+                            type="date"
+                            value={toDateInputValue(material.addedAt)}
+                            onChange={(e) => updateMaterialDate(material.id, e.target.value)}
+                            onBlur={() => setEditingDateId(null)}
+                            autoFocus
+                            aria-label={`Date introduced for ${material.name}`}
+                          />
+                        </label>
+                      ) : (
+                        <p className="material-date-text">
+                          <span>Date introduced</span>
+                          {formatDate(material.addedAt)}
+                        </p>
+                      )}
                     </article>
                   ))}
                   {visibleMaterials.length === 0 && <p className="empty">No files in this folder.</p>}
@@ -968,6 +1379,7 @@ export default function App() {
               </div>
             </div>
             {showUpload && <MaterialUploadModal />}
+            {viewingMaterial && <MaterialViewerModal />}
           </section>
         )}
 
@@ -1033,8 +1445,14 @@ export default function App() {
                     <button
                       key={folder.id}
                       type="button"
-                      className={activeFolder === folder.id ? 'folder active' : 'folder'}
+                      className={`folder${activeFolder === folder.id ? ' active' : ''}${noteDropFolder === folder.id ? ' drop-over' : ''}`}
                       onClick={() => setActiveFolder(folder.id)}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        setNoteDropFolder(folder.id)
+                      }}
+                      onDragLeave={() => setNoteDropFolder(null)}
+                      onDrop={(e) => dropOnFolder(e, folder.id, 'note')}
                     >
                       {folder.name}
                       <em>{notes.filter((n) => n.folderId === folder.id).length}</em>
@@ -1065,6 +1483,14 @@ export default function App() {
 
                 <div className="notes-main">
                   <div className="note-tools">
+                    <label className="check select-all">
+                      <input
+                        type="checkbox"
+                        checked={visibleNotes.length > 0 && visibleNotes.every((n) => selectedIds.includes(n.id))}
+                        onChange={toggleSelectAll}
+                      />
+                      Select all
+                    </label>
                     <input
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
@@ -1094,51 +1520,54 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="bulk-bar">
-                    <label className="check">
-                      <input
-                        type="checkbox"
-                        checked={visibleNotes.length > 0 && visibleNotes.every((n) => selectedIds.includes(n.id))}
-                        onChange={toggleSelectAll}
-                      />
-                      Select all
-                    </label>
-                    <span>
-                      {selectedCount} selected
-                    </span>
-                    <select
-                      value={moveTarget}
-                      onChange={(e) => setMoveTarget(e.target.value)}
-                      aria-label="Move selected notes to folder"
-                      disabled={selectedCount === 0}
-                    >
-                      {folders.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn btn-ghost"
-                      type="button"
-                      disabled={selectedCount === 0}
-                      onClick={moveSelected}
-                    >
-                      Move to folder
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      type="button"
-                      disabled={selectedCount === 0}
-                      onClick={deleteSelected}
-                    >
-                      Delete selected
-                    </button>
-                  </div>
+                  {selectedCount > 0 && (
+                    <div className="bulk-bar">
+                      <span>
+                        {selectedCount} selected
+                      </span>
+                      <select
+                        value={moveTarget}
+                        onChange={(e) => setMoveTarget(e.target.value)}
+                        aria-label="Move selected notes to folder"
+                        disabled={selectedCount === 0}
+                      >
+                        {folders.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        disabled={selectedCount === 0}
+                        onClick={moveSelected}
+                      >
+                        Move to folder
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        type="button"
+                        disabled={selectedCount === 0}
+                        onClick={deleteSelected}
+                      >
+                        Delete selected
+                      </button>
+                    </div>
+                  )}
 
                   <div className="notes">
                     {visibleNotes.map((note) => (
-                      <article key={note.id} className={selectedIds.includes(note.id) ? 'note selected' : 'note'}>
+                      <article
+                        key={note.id}
+                        className={selectedIds.includes(note.id) ? 'note selected' : 'note'}
+                        draggable
+                        onDragStart={(e) => {
+                          clearDragImage(e)
+                          setDraggedNoteId(note.id)
+                        }}
+                        onDragEnd={() => setDraggedNoteId(null)}
+                      >
                         <div className="note-top">
                           <label className="check" onClick={(e) => e.stopPropagation()}>
                             <input
