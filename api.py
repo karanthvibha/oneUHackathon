@@ -1,5 +1,5 @@
 """
-CS 2420 AI Tutor - API Server
+AI Tutor - API Server
 ------------------------------
 Wraps tutor.py's functions as HTTP endpoints so the frontend (React) and
 personalization logic (Linh's code) can call them without needing Python.
