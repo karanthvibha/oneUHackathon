@@ -1477,3 +1477,123 @@ textarea {
     margin-left: 0;
   }
 }
+/* CS 2420 Concept Mastery */
+
+.mastery-section {
+  margin: 24px 0 32px;
+  padding: 24px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 18px;
+}
+
+.mastery-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.mastery-header h2 {
+  margin: 4px 0 0;
+}
+
+.mastery-header > span {
+  font-size: 0.85rem;
+  opacity: 0.65;
+}
+
+.mastery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mastery-card {
+  padding: 16px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 14px;
+}
+
+.mastery-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.mastery-info span {
+  font-size: 0.8rem;
+  opacity: 0.65;
+}
+
+.mastery-score {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mastery-bar {
+  flex: 1;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mastery-fill {
+  height: 100%;
+  background: #6366f1;
+  border-radius: 999px;
+}
+
+.mastery-score > strong {
+  width: 42px;
+  text-align: right;
+}
+
+.recommendation-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 18px;
+  padding: 20px;
+  border-radius: 14px;
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.recommendation-card h2 {
+  margin: 4px 0 8px;
+}
+
+.recommendation-card p {
+  margin-bottom: 0;
+}
+
+.recommendation-details {
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommendation-details span {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+@media (max-width: 700px) {
+  .mastery-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recommendation-card {
+    flex-direction: column;
+  }
+
+  .mastery-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
