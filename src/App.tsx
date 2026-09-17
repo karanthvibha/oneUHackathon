@@ -6,7 +6,15 @@ type View = 'tutor' | 'plan' | 'notes' | 'files'
 type Message = { id: number; role: 'ai' | 'you'; text: string }
 type Folder = { id: string; name: string }
 type Note = { id: number; title: string; body: string; folderId: string }
-type Material = { id: number; name: string; type: string; folderId: string }
+type Material = {
+  id: number
+  name: string
+  type: string
+  folderId: string
+  addedAt: string
+  isStudyMaterial: boolean
+}
+type PlanItem = { id: string; day: string; title: string; minutes: number; done: boolean; materialId?: number }
 
 const INBOX = 'inbox'
 const ALL = 'all'
@@ -28,9 +36,30 @@ const seedMaterialFolders: Folder[] = [
 ]
 
 const seedMaterials: Material[] = [
-  { id: 1, name: 'Cell Biology — Week 3.pdf', type: 'Lecture notes', folderId: 'lectures' },
-  { id: 2, name: 'Enzyme Kinetics.pptx', type: 'Slides', folderId: 'slides' },
-  { id: 3, name: 'Metabolism Reading.pdf', type: 'Reading', folderId: 'readings' },
+  {
+    id: 1,
+    name: 'Cell Biology — Week 3.pdf',
+    type: 'Lecture notes',
+    folderId: 'lectures',
+    addedAt: '2026-09-12T12:00:00',
+    isStudyMaterial: false,
+  },
+  {
+    id: 2,
+    name: 'Enzyme Kinetics.pptx',
+    type: 'Slides',
+    folderId: 'slides',
+    addedAt: '2026-09-13T12:00:00',
+    isStudyMaterial: false,
+  },
+  {
+    id: 3,
+    name: 'Metabolism Reading.pdf',
+    type: 'Reading',
+    folderId: 'readings',
+    addedAt: '2026-09-14T12:00:00',
+    isStudyMaterial: false,
+  },
 ]
 
 const languages = [
@@ -273,12 +302,12 @@ const seedNotes: Note[] = [
   },
 ]
 
-const planDays = [
-  { day: 'Mon', title: 'Cell membranes', minutes: 45, done: true },
-  { day: 'Tue', title: 'Enzyme kinetics', minutes: 50, done: true },
-  { day: 'Wed', title: 'AI tutor quiz: metabolism', minutes: 30, done: false },
-  { day: 'Thu', title: 'Smart notes review', minutes: 25, done: false },
-  { day: 'Fri', title: 'Practice FRQs', minutes: 60, done: false },
+const seedPlanItems: PlanItem[] = [
+  { id: 'plan-1', day: 'Mon', title: 'Cell membranes', minutes: 45, done: true },
+  { id: 'plan-2', day: 'Tue', title: 'Enzyme kinetics', minutes: 50, done: true },
+  { id: 'plan-3', day: 'Wed', title: 'AI tutor quiz: metabolism', minutes: 30, done: false },
+  { id: 'plan-4', day: 'Thu', title: 'Smart notes review', minutes: 25, done: false },
+  { id: 'plan-5', day: 'Fri', title: 'Practice FRQs', minutes: 60, done: false },
 ]
 
 function titleFromBody(text: string) {
@@ -293,6 +322,14 @@ function typeFromFileName(name: string) {
   if (['doc', 'docx', 'pages', 'txt', 'md'].includes(ext)) return 'Lecture notes'
   if (['xls', 'xlsx', 'csv'].includes(ext)) return 'Handout'
   return 'Other'
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 }
 
 export default function App() {
@@ -320,11 +357,13 @@ export default function App() {
   const [moveTarget, setMoveTarget] = useState(INBOX)
   const [materialFolders, setMaterialFolders] = useState<Folder[]>(seedMaterialFolders)
   const [materials, setMaterials] = useState<Material[]>(seedMaterials)
+  const [planItems, setPlanItems] = useState<PlanItem[]>(seedPlanItems)
   const [materialFolder, setMaterialFolder] = useState(ALL)
   const [materialFolderName, setMaterialFolderName] = useState('')
   const [showMaterialFolderForm, setShowMaterialFolderForm] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
+  const [showCapture, setShowCapture] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tutorName, setTutorName] = useState<string>(() => localStorage.getItem('tutor-name') ?? 'Tutor')
   const [model, setModel] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
@@ -356,6 +395,7 @@ export default function App() {
   const editingNote = notes.find((n) => n.id === editingId) ?? null
   const selectedCount = selectedIds.length
   const languageLabel = languages.find((l) => l.value === targetLanguage)?.label ?? ''
+  const doneCount = planItems.filter((p) => p.done).length
   const visibleMaterials =
     materialFolder === ALL ? materials : materials.filter((m) => m.folderId === materialFolder)
 
@@ -508,9 +548,34 @@ export default function App() {
       name: file.name,
       type: typeFromFileName(file.name),
       folderId,
+      addedAt: new Date().toISOString(),
+      isStudyMaterial: false,
     }))
     setMaterials((prev) => [...newMaterials, ...prev])
     setShowUpload(false)
+  }
+
+  function toggleStudyMaterial(material: Material) {
+    if (material.isStudyMaterial) {
+      setMaterials((prev) =>
+        prev.map((m) => (m.id === material.id ? { ...m, isStudyMaterial: false } : m)),
+      )
+      setPlanItems((prev) => prev.filter((p) => p.materialId !== material.id))
+    } else {
+      setMaterials((prev) =>
+        prev.map((m) => (m.id === material.id ? { ...m, isStudyMaterial: true } : m)),
+      )
+      const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
+      const item: PlanItem = {
+        id: `plan-${material.id}`,
+        day,
+        title: material.name,
+        minutes: 30,
+        done: false,
+        materialId: material.id,
+      }
+      setPlanItems((prev) => [item, ...prev])
+    }
   }
 
   function MaterialUploadModal() {
@@ -742,22 +807,45 @@ export default function App() {
                 Send
               </button>
             </form>
-            <form className="capture" onSubmit={addFromTutor}>
-              <label htmlFor="capture">Save a clip to Smart Notes</label>
-              <textarea
-                id="capture"
-                value={capture}
-                onChange={(e) => setCapture(e.target.value)}
-                placeholder="Paste or write something worth keeping…"
-                rows={4}
-              />
-              <div className="capture-row">
-                <button className="btn btn-primary" type="submit">
-                  Add to smart notes
-                </button>
-                {captureStatus && <p className="status">{captureStatus}</p>}
-              </div>
-            </form>
+            <div className="capture-fab-wrap">
+              <button
+                className={`capture-fab${showCapture ? ' open' : ''}`}
+                type="button"
+                aria-expanded={showCapture}
+                onClick={() => setShowCapture((prev) => !prev)}
+              >
+                <span aria-hidden>✎</span>
+                Save to Smart Notes
+              </button>
+              {showCapture && (
+                <form className="capture capture-pop" onSubmit={addFromTutor}>
+                  <div className="capture-head">
+                    <label htmlFor="capture">Save a clip to Smart Notes</label>
+                    <button
+                      className="modal-close"
+                      type="button"
+                      aria-label="Close"
+                      onClick={() => setShowCapture(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <textarea
+                    id="capture"
+                    value={capture}
+                    onChange={(e) => setCapture(e.target.value)}
+                    placeholder="Paste or write something worth keeping…"
+                    rows={4}
+                  />
+                  <div className="capture-row">
+                    <button className="btn btn-primary" type="submit">
+                      Add to smart notes
+                    </button>
+                    {captureStatus && <p className="status">{captureStatus}</p>}
+                  </div>
+                </form>
+              )}
+            </div>
           </section>
         )}
 
@@ -769,13 +857,13 @@ export default function App() {
                 <h1>This week, in order</h1>
               </div>
               <p className="stat">
-                2 of 5 sessions done
+                {doneCount} of {planItems.length} sessions done
                 <span>Keep Wednesday light if the quiz feels shaky.</span>
               </p>
             </header>
             <ol className="plan">
-              {planDays.map((item) => (
-                <li key={item.day} className={item.done ? 'done' : undefined}>
+              {planItems.map((item) => (
+                <li key={item.id} className={item.done ? 'done' : undefined}>
                   <span className="day">{item.day}</span>
                   <div>
                     <strong>{item.title}</strong>
@@ -784,6 +872,7 @@ export default function App() {
                   <em>{item.done ? 'Done' : 'Up next'}</em>
                 </li>
               ))}
+              {planItems.length === 0 && <p className="empty">No study sessions planned yet.</p>}
             </ol>
           </section>
         )}
@@ -864,6 +953,14 @@ export default function App() {
                       </div>
                       <h2>{material.name}</h2>
                       <p>{materialFolderNameFor(material.folderId)}</p>
+                      <p className="material-meta">Added {formatDate(material.addedAt)}</p>
+                      <button
+                        className={`btn material-study-toggle ${material.isStudyMaterial ? 'study-on' : 'btn-ghost'}`}
+                        type="button"
+                        onClick={() => toggleStudyMaterial(material)}
+                      >
+                        {material.isStudyMaterial ? 'In study plan' : 'Add to study plan'}
+                      </button>
                     </article>
                   ))}
                   {visibleMaterials.length === 0 && <p className="empty">No files in this folder.</p>}
