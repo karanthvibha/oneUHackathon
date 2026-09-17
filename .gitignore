@@ -14,3 +14,6 @@ env/
 # Secrets — never commit credentials
 .env
 backend/.env
+=======
+__pycache__/
+*.pyc
