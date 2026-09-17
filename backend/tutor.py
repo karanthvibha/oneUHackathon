@@ -1,29 +1,38 @@
 """
-AI Tutor
-----------------
-Retrieval-augmented tutor for (BST, graphs, etc).
- 
-- Reads course PDFs from ./course_materials/
+AI Tutor (RAG)
+---------------
+Retrieval-augmented tutor for CS 2420 (BST, graphs, etc).
+
+- Reads course PDFs from a local folder (default ./course_materials/)
 - Retrieves relevant chunks with simple keyword matching (no AWS Knowledge Base needed)
-- Generates grounded, concise answers via gpt-oss-120b (through Bedrock's OpenAI-compatible API)
+- Generates grounded, concise answers via the configured model through Bedrock's
+  OpenAI-compatible API (default openai.gpt-oss-120b)
 - Remembers conversation history so follow-ups like "yes" work correctly
 - Gives short, direct answers with an optional follow-up offer, rather than long essays
 - Stays warm and patient, especially if the student sounds frustrated or confused
+
+All configuration lives in the backend .env file (see .env.example):
+    TUTOR_MODEL_ID          - model id (default openai.gpt-oss-120b)
+    OPENAI_BASE_URL         - Bedrock OpenAI-compatible endpoint
+    OPENAI_API_KEY          - API key
+    TUTOR_MATERIALS_FOLDER  - folder containing course PDFs (default course_materials)
 """
- 
+
+from __future__ import annotations
+
+import glob
+import json
 import os
 import re
-import json
-import glob
 import uuid
-from openai import OpenAI
- 
-# ---- CONFIG ----
-GENERATION_MODEL = "openai.gpt-oss-120b"
-MATERIALS_FOLDER = "course_materials"  # put your course PDFs in this folder
+
+from llm import complete
+
+# ---- CONFIG (all overridable via environment / .env) ----
+MATERIALS_FOLDER = os.getenv("TUTOR_MATERIALS_FOLDER", "course_materials")
 MAX_RETRIEVED_CHUNKS = 5
 MIN_CHUNK_LENGTH = 40  # skip tiny/noise fragments when chunking PDFs
- 
+
 # Short replies that mean "continue the previous topic" rather than a new question.
 # Retrieving on these literally (e.g. "yes") pulls irrelevant chunks, so we
 # detect them and retrieve based on the previous real question instead.
@@ -31,15 +40,11 @@ CONFIRMATION_WORDS = {
     "yes", "ya", "yea", "yeah", "yep", "sure", "ok", "okay", "please", "go ahead",
     "yes please", "sounds good", "please do", "yup", "continue",
 }
- 
-# ---- CLIENT ----
-# Picks up OPENAI_API_KEY and OPENAI_BASE_URL from environment variables.
-openai_client = OpenAI()
- 
+
 # ---- LOCAL RAG ----
 _CHUNKS_CACHE = None  # loaded once per run, reused across calls
- 
- 
+
+
 def _load_chunks() -> list[str]:
     """
     Extract text from every PDF in MATERIALS_FOLDER and split it into
@@ -49,18 +54,19 @@ def _load_chunks() -> list[str]:
     global _CHUNKS_CACHE
     if _CHUNKS_CACHE is not None:
         return _CHUNKS_CACHE
- 
-    import pdfplumber
- 
+
+    from pypdf import PdfReader
+
     chunks = []
     pdf_paths = glob.glob(os.path.join(MATERIALS_FOLDER, "*.pdf"))
- 
+
     if not pdf_paths:
         print(f"WARNING: no PDFs found in '{MATERIALS_FOLDER}/' — retrieval will return nothing.")
- 
+
     for path in pdf_paths:
-        with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
+        try:
+            reader = PdfReader(path)
+            for page in reader.pages:
                 text = page.extract_text() or ""
                 for paragraph in re.split(r"\n\s*\n", text):
                     paragraph = paragraph.strip()
@@ -71,11 +77,13 @@ def _load_chunks() -> list[str]:
                     if re.search(r"pollev\.com|poll everywhere", paragraph, re.IGNORECASE):
                         continue
                     chunks.append(paragraph)
- 
+        except Exception as exc:  # noqa: BLE001 - a bad file shouldn't kill retrieval
+            print(f"WARNING: could not read '{path}': {exc}")
+
     _CHUNKS_CACHE = chunks
     return chunks
- 
- 
+
+
 def retrieve_context(query: str, max_results: int = MAX_RETRIEVED_CHUNKS) -> list[str]:
     """
     Simple local retrieval: score each chunk by how many of the query's
@@ -85,22 +93,22 @@ def retrieve_context(query: str, max_results: int = MAX_RETRIEVED_CHUNKS) -> lis
     chunks = _load_chunks()
     if not chunks:
         return []
- 
+
     keywords = [w.lower() for w in re.findall(r"\w+", query) if len(w) > 2]
     if not keywords:
         return []
- 
+
     scored = []
     for chunk in chunks:
         chunk_lower = chunk.lower()
         score = sum(chunk_lower.count(kw) for kw in keywords)
         if score > 0:
             scored.append((score, chunk))
- 
+
     scored.sort(key=lambda pair: pair[0], reverse=True)
     return [chunk for _, chunk in scored[:max_results]]
- 
- 
+
+
 def _resolve_retrieval_query(question: str, history: list[dict] | None) -> str:
     """
     If the student's message is just a short confirmation (e.g. "yes"),
@@ -112,16 +120,15 @@ def _resolve_retrieval_query(question: str, history: list[dict] | None) -> str:
             if msg["role"] == "user":
                 return msg["content"]
     return question
- 
- 
+
 # ---- CORE TUTOR FUNCTIONS ----
- 
+
 TUTOR_SYSTEM_PROMPT_TEMPLATE = """You are a friendly, patient CS 2420 tutor.
- 
+
 You have two sources of knowledge:
 1. The course material provided below, from this specific class.
 2. Your own broader knowledge of computer science.
- 
+
 RULES:
 1. Answer ONLY what the student literally asked. Keep it short — 2 to 5 sentences for
    simple questions. Do not explain related or advanced topics they didn't ask about.
@@ -142,43 +149,37 @@ RULES:
    example — do not reuse specific numbers, poll questions, or quiz questions verbatim
    from the course material, even if they appear in the retrieved context. Those are for
    graded exercises, not generic teaching examples.
- 
+
 Always respond in {language}.
 """
- 
- 
+
+
 def ask_tutor(question: str, language: str = "English", history: list[dict] | None = None) -> str:
     """
     Full RAG pipeline: retrieve relevant course content, then generate a
     grounded, tutor-style answer in the requested language.
- 
+
     `history` is an optional list of prior {"role": "user"/"assistant", "content": "..."}
     messages, so the model understands follow-ups like "yes" or "I still don't get it".
     """
     retrieval_query = _resolve_retrieval_query(question, history)
     chunks = retrieve_context(retrieval_query)
     context_text = "\n\n---\n\n".join(chunks) if chunks else "No specific course material found."
- 
+
     system_prompt = TUTOR_SYSTEM_PROMPT_TEMPLATE.format(language=language)
- 
-    messages = [{"role": "system", "content": system_prompt}]
+
+    messages = []
     if history:
         messages.extend(history)
- 
+
     user_prompt = f"""Course material:
 {context_text}
- 
+
 Student question: {question}"""
     messages.append({"role": "user", "content": user_prompt})
- 
-    response = openai_client.responses.create(
-        model=GENERATION_MODEL,
-        input=messages,
-    )
- 
-    return response.output_text
- 
- 
+
+    return complete(messages, system_prompt=system_prompt)
+
 def evaluate_answer(question: str, correct_answer: str, student_answer: str) -> dict:
     """
     Evaluate a student's answer against the correct answer/explanation.
@@ -202,15 +203,7 @@ Student's answer: {student_answer}
 
 Is the student's answer correct? Give brief, encouraging feedback."""
 
-    response = openai_client.responses.create(
-        model=GENERATION_MODEL,
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-
-    raw = response.output_text.strip()
+    raw = complete([{"role": "user", "content": user_prompt}], system_prompt=system_prompt)
     raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
@@ -223,7 +216,7 @@ Is the student's answer correct? Give brief, encouraging feedback."""
             "feedback": f"Here's the correct answer: {correct_answer}",
         }
 
-    
+
 def generate_practice_question(concept: str, difficulty: str = "medium", language: str = "English") -> dict:
     """
     Generate a practice question for a given concept and difficulty level,
@@ -265,15 +258,7 @@ def generate_practice_question(concept: str, difficulty: str = "medium", languag
 Concept: {concept}
 Difficulty: {difficulty}"""
 
-    response = openai_client.responses.create(
-        model=GENERATION_MODEL,
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
-
-    raw = response.output_text.strip()
+    raw = complete([{"role": "user", "content": user_prompt}], system_prompt=system_prompt)
     raw = raw.replace("```json", "").replace("```", "").strip()
 
     try:
@@ -293,60 +278,4 @@ Difficulty: {difficulty}"""
     result["question_id"] = f"{concept_prefix}_{uuid.uuid4().hex[:6].upper()}"
 
     return result
- 
-# ---- INTERACTIVE CLI (for manual testing) ----
- 
-if __name__ == "__main__":
-    print("=== Hi! I'm your CS 2420 AI Tutor. Ask me anything (type 'quit' to exit) ===")
-    print("(Type 'quiz <concept>' e.g. 'quiz me on BST' to get a practice question)\n")
-    conversation_history: list[dict] = []
-    pending_question = None  # holds the active practice question while waiting for an answer
 
-    while True:
-        prompt_text = "Your answer: " if pending_question is not None else "Ask a question: "
-        user_input = input(prompt_text).strip()
-        if user_input.lower() in ("quit", "exit", "q"):
-            print("Goodbye! Good luck with CS 2420!")
-            break
-        if not user_input:
-            continue
-
-        # If we're waiting on an answer to a practice question, grade it instead
-        # of treating this input as a new question.
-        if pending_question is not None:
-            print("\nGrading your answer...\n")
-            result = evaluate_answer(
-                question=pending_question["question_text"],
-                correct_answer=pending_question["correct_answer"],
-                student_answer=user_input,
-            )
-            if result.get("correct"):
-                print(f"✅ Correct! {result.get('feedback', '')}\n")
-            else:
-                print(f"❌ Not quite. {result.get('feedback', '')}\n")
-            print("-" * 60 + "\n")
-            pending_question = None  # clear it, ready for the next question
-            continue
-
-        # special command to start a quiz: "quiz", "quiz BST", "quiz me on BST", etc.
-        if user_input.lower() == "quiz" or user_input.lower().startswith("quiz"):
-            concept = user_input[4:].strip()
-            concept = re.sub(r"^(me\s+)?(on|about|for)\s+", "", concept, flags=re.IGNORECASE).strip()
-
-            if not concept:
-                print("\nWhat concept would you like a practice question on? (e.g. 'quiz BST insertion')\n")
-                continue
-
-            print(f"\nHere's a question about {concept}:\n")
-            pending_question = generate_practice_question(concept)
-            print(pending_question["question_text"])
-            print("\n(Type your answer below)\n")
-            continue
-
-        # otherwise, treat it as a normal tutoring question
-        answer = ask_tutor(user_input, language="English", history=conversation_history)
-        print("\n" + answer + "\n")
-        print("-" * 60 + "\n")
-
-        conversation_history.append({"role": "user", "content": user_input})
-        conversation_history.append({"role": "assistant", "content": answer})

@@ -104,223 +104,18 @@ const navItems: { id: View; label: string; hint: string; icon: string }[] = [
   { id: 'files', label: 'Files', hint: 'Upload & organize', icon: '▤' },
 ]
 
-const modelOptions = ['GPT-4o', 'Claude 3.5 Sonnet', 'Gemini 1.5 Pro', 'Llama 3.1 70B']
-
 const seedMaterialFolders: Folder[] = [{ id: INBOX, name: 'Inbox' }]
 
 const seedMaterials: Material[] = []
 
 const languages = [
-  { value: 'es', label: 'Español' },
-  { value: 'fr', label: 'Français' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'it', label: 'Italiano' },
-  { value: 'pt', label: 'Português' },
+  { value: 'en', label: 'English', name: 'English' },
+  { value: 'es', label: 'Español', name: 'Spanish' },
+  { value: 'fr', label: 'Français', name: 'French' },
+  { value: 'de', label: 'Deutsch', name: 'German' },
+  { value: 'it', label: 'Italiano', name: 'Italian' },
+  { value: 'pt', label: 'Português', name: 'Portuguese' },
 ]
-
-const translationDict: Record<string, Record<string, string>> = {
-  es: {
-    hello: 'hola',
-    hi: 'hola',
-    "i'm": 'soy',
-    i: 'yo',
-    you: 'tú',
-    your: 'tu',
-    "you're": 'eres',
-    tutor: 'tutor',
-    this: 'este',
-    screen: 'pantalla',
-    is: 'es',
-    only: 'solo',
-    for: 'para',
-    now: 'ahora',
-    no: 'no',
-    api: 'API',
-    wired: 'conectado',
-    up: 'arriba',
-    the: 'el',
-    a: 'un',
-    an: 'un',
-    and: 'y',
-    to: 'a',
-    of: 'de',
-    what: 'qué',
-    explain: 'explicar',
-    question: 'pregunta',
-    ask: 'preguntar',
-    yes: 'sí',
-    can: 'puede',
-    studying: 'estudiando',
-    study: 'estudiar',
-    notes: 'notas',
-    plan: 'plan',
-    help: 'ayuda',
-  },
-  fr: {
-    hello: 'bonjour',
-    hi: 'salut',
-    "i'm": 'je suis',
-    i: 'je',
-    you: 'tu',
-    your: 'ton',
-    "you're": 'tu es',
-    tutor: 'tuteur',
-    this: 'ce',
-    screen: 'écran',
-    is: 'est',
-    only: 'seulement',
-    for: 'pour',
-    now: 'maintenant',
-    no: 'non',
-    api: 'API',
-    wired: 'câblé',
-    up: 'en haut',
-    the: 'le',
-    a: 'un',
-    an: 'un',
-    and: 'et',
-    to: 'à',
-    of: 'de',
-    what: 'quoi',
-    explain: 'expliquer',
-    question: 'question',
-    ask: 'demander',
-    yes: 'oui',
-    can: 'peut',
-    studying: 'étudiant',
-    study: 'étudier',
-    notes: 'notes',
-    plan: 'plan',
-    help: 'aide',
-  },
-  de: {
-    hello: 'hallo',
-    hi: 'hallo',
-    "i'm": 'ich bin',
-    i: 'ich',
-    you: 'du',
-    your: 'dein',
-    "you're": 'du bist',
-    tutor: 'Tutor',
-    this: 'dies',
-    screen: 'Bildschirm',
-    is: 'ist',
-    only: 'nur',
-    for: 'für',
-    now: 'jetzt',
-    no: 'nein',
-    api: 'API',
-    wired: 'verkabelt',
-    up: 'oben',
-    the: 'der',
-    a: 'ein',
-    an: 'ein',
-    and: 'und',
-    to: 'zu',
-    of: 'von',
-    what: 'was',
-    explain: 'erklären',
-    question: 'Frage',
-    ask: 'fragen',
-    yes: 'ja',
-    can: 'kann',
-    studying: 'lernend',
-    study: 'lernen',
-    notes: 'Notizen',
-    plan: 'Plan',
-    help: 'Hilfe',
-  },
-  it: {
-    hello: 'ciao',
-    hi: 'ciao',
-    "i'm": 'sono',
-    i: 'io',
-    you: 'tu',
-    your: 'tuo',
-    "you're": 'sei',
-    tutor: 'tutor',
-    this: 'questo',
-    screen: 'schermo',
-    is: 'è',
-    only: 'solo',
-    for: 'per',
-    now: 'ora',
-    no: 'no',
-    api: 'API',
-    wired: 'cablato',
-    up: 'su',
-    the: 'il',
-    a: 'un',
-    an: 'un',
-    and: 'e',
-    to: 'a',
-    of: 'di',
-    what: 'cosa',
-    explain: 'spiegare',
-    question: 'domanda',
-    ask: 'chiedere',
-    yes: 'sì',
-    can: 'può',
-    studying: 'studiando',
-    study: 'studiare',
-    notes: 'note',
-    plan: 'piano',
-    help: 'aiuto',
-  },
-  pt: {
-    hello: 'olá',
-    hi: 'oi',
-    "i'm": 'sou',
-    i: 'eu',
-    you: 'você',
-    your: 'seu',
-    "you're": 'você é',
-    tutor: 'tutor',
-    this: 'este',
-    screen: 'tela',
-    is: 'é',
-    only: 'apenas',
-    for: 'para',
-    now: 'agora',
-    no: 'não',
-    api: 'API',
-    wired: 'conectado',
-    up: 'acima',
-    the: 'o',
-    a: 'um',
-    an: 'um',
-    and: 'e',
-    to: 'para',
-    of: 'de',
-    what: 'o que',
-    explain: 'explicar',
-    question: 'pergunta',
-    ask: 'perguntar',
-    yes: 'sim',
-    can: 'pode',
-    studying: 'estudando',
-    study: 'estudar',
-    notes: 'notas',
-    plan: 'plano',
-    help: 'ajuda',
-  },
-}
-
-function simulateTranslation(text: string, lang: string) {
-  const dict = translationDict[lang]
-  if (!dict) return text
-  return text
-    .split(/(\s+)/)
-    .map((token) => {
-      if (!token.trim()) return token
-      const cleaned = token.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ'’]/g, '')
-      if (!cleaned) return token
-      const key = cleaned.toLowerCase()
-      const translated = dict[key]
-      return translated ? translated + token.slice(cleaned.length) : token
-    })
-    .join('')
-}
 
 const seedFolders: Folder[] = [{ id: INBOX, name: 'Inbox' }]
 
@@ -439,10 +234,11 @@ export default function App() {
     {
       id: 1,
       role: 'ai',
-      text: 'Hi — I’m your tutor. This screen is UI-only for now: no tutoring API is wired up.',
+      text: 'Hi — I’m your tutor. Ask me anything about your course material!',
     },
   ])
   const [draft, setDraft] = useState('')
+  const [tutorBusy, setTutorBusy] = useState(false)
   const [capture, setCapture] = useState('')
   const [captureStatus, setCaptureStatus] = useState('')
   const [noteIntegrationStatus, setNoteIntegrationStatus] = useState('')
@@ -487,7 +283,6 @@ export default function App() {
   const [viewText, setViewText] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tutorName, setTutorName] = useState<string>(() => localStorage.getItem('tutor-name') ?? 'Tutor')
-  const [model] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
   const [quizFrequencyDays, setQuizFrequencyDays] = useState<number>(() => {
     const stored = Number(localStorage.getItem('tutor-quiz-frequency') ?? DEFAULT_QUIZ_FREQUENCY_DAYS)
     return Number.isFinite(stored) && stored >= 1
@@ -497,33 +292,14 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [nameDraft, setNameDraft] = useState(tutorName)
   const [frequencyDraft, setFrequencyDraft] = useState(quizFrequencyDays)
-  const [bedrockRegion, setBedrockRegion] = useState<string>(
-    () => localStorage.getItem('bedrock-region') ?? 'us-west-2',
-  )
-  const [bedrockAccessKeyId, setBedrockAccessKeyId] = useState<string>('')
-  const [bedrockSecretAccessKey, setBedrockSecretAccessKey] = useState<string>('')
-  const [bedrockSessionToken, setBedrockSessionToken] = useState<string>('')
-  const [bedrockModelId, setBedrockModelId] = useState<string>(
-    () => localStorage.getItem('bedrock-model-id') ?? '',
-  )
-  const [bedrockRegionDraft, setBedrockRegionDraft] = useState(bedrockRegion)
-  const [bedrockAccessKeyIdDraft, setBedrockAccessKeyIdDraft] = useState(bedrockAccessKeyId)
-  const [bedrockSecretAccessKeyDraft, setBedrockSecretAccessKeyDraft] = useState(bedrockSecretAccessKey)
-  const [bedrockSessionTokenDraft, setBedrockSessionTokenDraft] = useState(bedrockSessionToken)
-  const [bedrockModelIdDraft, setBedrockModelIdDraft] = useState(bedrockModelId)
-  const [showTranslation, setShowTranslation] = useState<boolean>(
-    () => localStorage.getItem('tutor-translate') === 'on',
-  )
   const [targetLanguage, setTargetLanguage] = useState<string>(
-    () => localStorage.getItem('tutor-lang') ?? 'es',
+    () => localStorage.getItem('tutor-lang') ?? 'en',
   )
-
-  // Credentials are not persisted; clear any legacy copies stored by older versions.
-  useEffect(() => {
-    localStorage.removeItem('bedrock-access-key-id')
-    localStorage.removeItem('bedrock-secret-access-key')
-    localStorage.removeItem('bedrock-session-token')
-  }, [])
+  const [quizMode, setQuizMode] = useState(false)
+  const [pendingQuestion, setPendingQuestion] = useState<{
+    question_text: string
+    correct_answer: string
+  } | null>(null)
 
   // Hydrate persisted file blobs into material metadata.
   useEffect(() => {
@@ -596,7 +372,7 @@ export default function App() {
   const editingNote = notes.find((n) => n.id === editingId) ?? null
   const selectedCount = selectedIds.length
   const selectedMaterialCount = selectedMaterialIds.length
-  const languageLabel = languages.find((l) => l.value === targetLanguage)?.label ?? ''
+  const languageName = languages.find((l) => l.value === targetLanguage)?.name ?? 'English'
   const visibleMaterials = useMemo(() => {
     const q = materialQuery.trim().toLowerCase()
     return materials
@@ -645,12 +421,95 @@ export default function App() {
 
   const focusStreak = useMemo(() => computeStreak(completedQuizDates), [completedQuizDates])
 
-  function sendTutor(event: FormEvent) {
+  async function sendTutor(event: FormEvent) {
     event.preventDefault()
     const text = draft.trim()
-    if (!text) return
+    if (!text || tutorBusy) return
     setMessages((prev) => [...prev, { id: Date.now(), role: 'you', text }])
     setDraft('')
+    setTutorBusy(true)
+
+    try {
+      if (quizMode) {
+        if (!pendingQuestion) {
+          // Generate a practice question for the entered concept.
+          const response = await fetch(`${BACKEND_URL}/api/tutor/practice-question`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              student_id: 'demo',
+              concept: text,
+              difficulty: 'medium',
+              language: languageName,
+            }),
+          })
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+          const questionText = String(data?.question_text ?? '').trim()
+          const correctAnswer = String(data?.correct_answer ?? '').trim()
+          if (questionText) {
+            setPendingQuestion({ question_text: questionText, correct_answer: correctAnswer })
+          }
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              role: 'ai',
+              text: questionText || 'Sorry — I couldn’t generate a question. Try again.',
+            },
+          ])
+        } else {
+          // Grade the student's answer.
+          const response = await fetch(`${BACKEND_URL}/api/tutor/evaluate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question: pendingQuestion.question_text,
+              correct_answer: pendingQuestion.correct_answer,
+              student_answer: text,
+            }),
+          })
+          const data = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+          const correct = Boolean(data?.correct)
+          const feedback = String(data?.feedback ?? '').trim()
+          setPendingQuestion(null)
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + 1,
+              role: 'ai',
+              text: `${correct ? '✅ Correct!' : '❌ Not quite.'} ${feedback}`.trim(),
+            },
+          ])
+        }
+      } else {
+        const response = await fetch(`${BACKEND_URL}/api/tutor/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ student_id: 'demo', question: text, language: languageName }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+        const answer = String(data?.answer ?? '').trim()
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + 1,
+            role: 'ai',
+            text: answer || 'Sorry — I got an empty reply. Try asking again.',
+          },
+        ])
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now() + 1, role: 'ai', text: `Sorry, I couldn’t reach the tutor: ${message}` },
+      ])
+    } finally {
+      setTutorBusy(false)
+    }
   }
 
   function addNoteToFolder(title: string, body: string, folderId = INBOX) {
@@ -688,7 +547,6 @@ export default function App() {
         text,
         existingNotes: notes,
         folders,
-        modelId: bedrockModelId.trim() || undefined,
       }),
     })
       .then(async (response) => {
@@ -735,7 +593,6 @@ export default function App() {
     form.append('file', file)
     form.append('existingNotesJson', JSON.stringify(notes))
     form.append('foldersJson', JSON.stringify(folders))
-    if (bedrockModelId.trim()) form.append('modelId', bedrockModelId.trim())
 
     fetch(`${BACKEND_URL}/api/bedrock/integrate-notes`, { method: 'POST', body: form })
       .then(async (response) => {
@@ -820,11 +677,6 @@ export default function App() {
   function openSettings() {
     setNameDraft(tutorName)
     setFrequencyDraft(quizFrequencyDays)
-    setBedrockRegionDraft(bedrockRegion)
-    setBedrockAccessKeyIdDraft(bedrockAccessKeyId)
-    setBedrockSecretAccessKeyDraft(bedrockSecretAccessKey)
-    setBedrockSessionTokenDraft(bedrockSessionToken)
-    setBedrockModelIdDraft(bedrockModelId)
     setShowSettings(true)
   }
 
@@ -842,27 +694,7 @@ export default function App() {
     localStorage.setItem('tutor-quiz-frequency', String(freq))
     setFrequencyDraft(freq)
 
-    const nextRegion = bedrockRegionDraft.trim() || 'us-west-2'
-    setBedrockRegion(nextRegion)
-    localStorage.setItem('bedrock-region', nextRegion)
-    setBedrockRegionDraft(nextRegion)
-
-    // AWS credentials stay in memory only; they are never written to browser storage.
-    setBedrockAccessKeyId(bedrockAccessKeyIdDraft)
-    setBedrockSecretAccessKey(bedrockSecretAccessKeyDraft)
-    setBedrockSessionToken(bedrockSessionTokenDraft)
-    setBedrockModelId(bedrockModelIdDraft)
-    localStorage.setItem('bedrock-model-id', bedrockModelIdDraft)
-
     setShowSettings(false)
-  }
-
-  function toggleTranslation() {
-    setShowTranslation((prev) => {
-      const next = !prev
-      localStorage.setItem('tutor-translate', next ? 'on' : 'off')
-      return next
-    })
   }
 
   function updateLanguage(lang: string) {
@@ -870,14 +702,21 @@ export default function App() {
     localStorage.setItem('tutor-lang', lang)
   }
 
-  function renderChat(translated: boolean) {
+  function startQuiz() {
+    setQuizMode(true)
+    setPendingQuestion(null)
+  }
+
+  function endQuiz() {
+    setQuizMode(false)
+    setPendingQuestion(null)
+  }
+
+  function renderChat() {
     return messages.map((m) => (
-      <article
-        key={`${translated ? 'translated' : 'original'}-${m.id}`}
-        className={`bubble ${m.role}${translated ? ' translated' : ''}`}
-      >
+      <article key={m.id} className={`bubble ${m.role}`}>
         <span>{m.role === 'ai' ? tutorName : 'You'}</span>
-        <p>{translated ? simulateTranslation(m.text, targetLanguage) : m.text}</p>
+        <p>{m.text}</p>
       </article>
     ))
   }
@@ -1361,53 +1200,6 @@ export default function App() {
                   onChange={(e) => setFrequencyDraft(Number(e.target.value))}
                 />
 
-                <p className="settings-section">Amazon Bedrock</p>
-                <label htmlFor="bedrock-region">Region</label>
-                <input
-                  id="bedrock-region"
-                  value={bedrockRegionDraft}
-                  onChange={(e) => setBedrockRegionDraft(e.target.value)}
-                  placeholder="us-west-2"
-                />
-                <label htmlFor="bedrock-access-key-id">Access key ID</label>
-                <input
-                  id="bedrock-access-key-id"
-                  value={bedrockAccessKeyIdDraft}
-                  onChange={(e) => setBedrockAccessKeyIdDraft(e.target.value)}
-                  placeholder="AKIA…"
-                  autoComplete="off"
-                />
-                <label htmlFor="bedrock-secret-access-key">Secret access key</label>
-                <input
-                  id="bedrock-secret-access-key"
-                  type="password"
-                  value={bedrockSecretAccessKeyDraft}
-                  onChange={(e) => setBedrockSecretAccessKeyDraft(e.target.value)}
-                  placeholder="Enter your secret access key"
-                  autoComplete="off"
-                />
-                <label htmlFor="bedrock-session-token">Session token (optional)</label>
-                <input
-                  id="bedrock-session-token"
-                  type="password"
-                  value={bedrockSessionTokenDraft}
-                  onChange={(e) => setBedrockSessionTokenDraft(e.target.value)}
-                  placeholder="For temporary credentials"
-                  autoComplete="off"
-                />
-                <label htmlFor="bedrock-model-id">Model ID</label>
-                <input
-                  id="bedrock-model-id"
-                  value={bedrockModelIdDraft}
-                  onChange={(e) => setBedrockModelIdDraft(e.target.value)}
-                  placeholder="anthropic.claude-3-5-sonnet-20241022-v2:0"
-                />
-                <p className="settings-note">
-                  AWS credentials are kept in memory for this session only and are never saved to
-                  your browser. For persistent, secure storage, connect a backend (e.g. AWS Secrets
-                  Manager) instead of using secrets in the browser.
-                </p>
-
                 <div className="settings-actions">
                   <button
                     className="btn btn-ghost"
@@ -1435,28 +1227,14 @@ export default function App() {
                 <h1>Ask anything you’re studying</h1>
               </div>
               <div className="head-side">
-                <p className="stat">
-                  {model}
-                  <span>Active tutor model</span>
-                </p>
                 <div className="tutor-tools">
-                  <button
-                    className={`toggle${showTranslation ? ' on' : ''}`}
-                    type="button"
-                    role="switch"
-                    aria-checked={showTranslation}
-                    onClick={toggleTranslation}
-                  >
-                    <span className="toggle-track" aria-hidden>
-                      <span className="toggle-thumb" />
-                    </span>
-                    Translate
-                  </button>
-                  {showTranslation && (
+                  <label className="tutor-lang" htmlFor="tutor-lang">
+                    <span>Respond in</span>
                     <select
+                      id="tutor-lang"
                       value={targetLanguage}
                       onChange={(e) => updateLanguage(e.target.value)}
-                      aria-label="Translation language"
+                      aria-label="Response language"
                     >
                       {languages.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -1464,35 +1242,40 @@ export default function App() {
                         </option>
                       ))}
                     </select>
-                  )}
+                  </label>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={quizMode ? endQuiz : startQuiz}
+                  >
+                    {quizMode ? 'End quiz' : 'Practice question'}
+                  </button>
                 </div>
               </div>
             </header>
-            <div className={`chat-layout${showTranslation ? ' split' : ''}`}>
+            <div className="chat-layout">
               <div className="chat-col">
-                {showTranslation && <p className="chat-col-label">Original</p>}
                 <div className="chat" aria-live="polite">
-                  {renderChat(false)}
+                  {renderChat()}
                 </div>
               </div>
-              {showTranslation && (
-                <div className="chat-col">
-                  <p className="chat-col-label">{languageLabel} translation</p>
-                  <div className="chat" aria-live="polite">
-                    {renderChat(true)}
-                  </div>
-                </div>
-              )}
             </div>
             <form className="composer" onSubmit={sendTutor}>
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="Explain osmosis like I’m in AP Bio…"
+                placeholder={
+                  quizMode
+                    ? pendingQuestion
+                      ? 'Type your answer…'
+                      : 'Enter a concept to practice (e.g. BST)…'
+                    : 'Explain osmosis like I’m in AP Bio…'
+                }
                 aria-label="Message the tutor"
+                disabled={tutorBusy}
               />
-              <button className="btn btn-primary" type="submit">
-                Send
+              <button className="btn btn-primary" type="submit" disabled={tutorBusy}>
+                {quizMode ? (pendingQuestion ? 'Submit answer' : 'Start quiz') : 'Send'}
               </button>
             </form>
             <CaptureButton />

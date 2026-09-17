@@ -1,9 +1,13 @@
 # Lumen Flask Backend
 
-A Python Flask API that keeps Amazon Bedrock credentials server-side and invokes models
-through the Bedrock Converse API. The React frontend never receives the secrets.
+A Python Flask API that keeps the model credentials server-side. Both the AI Tutor and
+Smart Notes use the SAME model through Amazon Bedrock's OpenAI-compatible API. The React
+frontend never receives the secret key.
 
 ## Setup
+
+The repo root's `npm run dev` creates the virtualenv and installs dependencies
+automatically. To do it manually:
 
 ```bash
 cd backend
@@ -13,8 +17,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and set the AWS region, model ID, and credentials (or rely on your
-environment's default AWS credential chain / IAM role).
+Edit `.env` and set your Bedrock API key (and model/endpoint if you want to change them).
 
 ## Run
 
@@ -24,38 +27,26 @@ python wsgi.py
 
 The server listens on `http://localhost:5001` by default.
 
+## Configuration
+
+All model + Bedrock settings live in `backend/.env` (see `backend/.env.example`), not in the UI:
+
+- `TUTOR_MODEL_ID` — the single model used by the AI Tutor and Smart Notes (default `openai.gpt-oss-120b`).
+- `OPENAI_BASE_URL` — Bedrock's OpenAI-compatible endpoint for your region.
+- `OPENAI_API_KEY` — your Amazon Bedrock API key (Bedrock console → API keys).
+- `TUTOR_MATERIALS_FOLDER` — folder with the course PDFs used by tutor retrieval.
+- `CORS_ORIGINS` / `PORT` / `FLASK_DEBUG` — Flask options.
+
 ## Endpoints
 
 - `GET /api/health` — liveness check.
-- `GET /api/bedrock/status` — returns whether credentials are configured, the region,
-  and model ID. Never returns secret values.
-- `POST /api/bedrock/invoke` — invokes Amazon Bedrock.
-
-Request body for `/api/bedrock/invoke`:
-
-```json
-{
-  "modelId": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-  "messages": [
-    { "role": "user", "content": [{ "text": "Explain osmosis." }] }
-  ],
-  "inferenceConfig": {
-    "temperature": 0.7,
-    "maxTokens": 1024
-  }
-}
-```
-
-Response:
-
-```json
-{
-  "text": "Osmosis is ...",
-  "modelId": "anthropic.claude-3-5-sonnet-20241022-v2:0"
-}
-```
+- `POST /api/tutor/ask` — asks the RAG tutor a question (`{student_id, question, language}` → `{answer}`).
+- `POST /api/tutor/evaluate` — grades a student answer (`{question, correct_answer, student_answer}` → `{correct, feedback}`).
+- `POST /api/tutor/practice-question` — generates a practice question (`{student_id, concept, difficulty, language}`).
+- `POST /api/tutor/reset-history` — clears a student's tutor history (`{student_id}`).
+- `POST /api/bedrock/integrate-notes` — turns an uploaded file into Smart Notes (multipart `file`, `existingNotesJson`, `foldersJson`).
+- `POST /api/bedrock/integrate-text` — turns clipped text into Smart Notes (`{text, existingNotes, folders}`).
 
 ## Security
 
-Store secrets in environment variables (or AWS IAM roles / AWS Secrets Manager), never
-in the frontend. The `.env` file is git-ignored; use `.env.example` as a template.
+The `.env` file is git-ignored; use `.env.example` as a template. Never commit the API key.

@@ -6,12 +6,19 @@ import re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-try:  # pragma: no cover - dependency optional at import time
-    import boto3
-    from botocore.exceptions import BotoCoreError, ClientError
-except ImportError:  # pragma: no cover
-    boto3 = None
-    BotoCoreError = ClientError = None
+from llm import complete
+from tutor import ask_tutor, evaluate_answer, generate_practice_question
+
+# ---- PER-STUDENT TUTOR SESSION STATE ----
+# In-memory storage: {student_id: [{"role": ..., "content": ...}, ...]}
+# NOTE: this resets if the server restarts. Fine for a hackathon demo;
+# a real app would store this in a database instead.
+_conversation_histories: dict[str, list[dict]] = {}
+_pending_questions: dict[str, dict] = {}  # {student_id: question_dict}
+
+
+def _get_history(student_id: str) -> list[dict]:
+    return _conversation_histories.setdefault(student_id, [])
 
 
 def _load_env():
@@ -139,99 +146,12 @@ def create_app():
         resources={r"/api/*": {"origins": [o.strip() for o in allowed_origins.split(",") if o.strip()]}},
     )
 
-    def credentials_from_env():
-        access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("BEDROCK_ACCESS_KEY_ID")
-        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv("BEDROCK_SECRET_ACCESS_KEY")
-        session_token = os.getenv("AWS_SESSION_TOKEN") or os.getenv("BEDROCK_SESSION_TOKEN")
-        return access_key, secret_key, session_token
-
-    def region():
-        return os.getenv("AWS_REGION") or os.getenv("BEDROCK_REGION") or "us-west-2"
-
-    def default_model_id():
-        return os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
-
-    def get_bedrock_client():
-        if boto3 is None:
-            raise RuntimeError("boto3 is not installed. Run: pip install -r requirements.txt")
-
-        access_key, secret_key, session_token = credentials_from_env()
-        kwargs = {"region_name": region()}
-        if access_key and secret_key:
-            kwargs["aws_access_key_id"] = access_key
-            kwargs["aws_secret_access_key"] = secret_key
-        if session_token:
-            kwargs["aws_session_token"] = session_token
-
-        return boto3.client("bedrock-runtime", **kwargs)
-
-    def bedrock_error_response(exc):
-        if ClientError and isinstance(exc, ClientError):
-            code = exc.response.get("Error", {}).get("Code", "ClientError")
-            message = exc.response.get("Error", {}).get("Message", str(exc))
-        else:
-            code = "BedrockError"
-            message = str(exc)
-        return jsonify({"error": message, "code": code}), 502
-
     @app.get("/api/health")
     def health():
         return jsonify({"status": "ok"})
 
-    @app.get("/api/bedrock/status")
-    def bedrock_status():
-        access_key, secret_key, _ = credentials_from_env()
-        env_secrets_set = bool(access_key and secret_key)
-        return jsonify(
-            {
-                "configured": env_secrets_set,
-                "region": region(),
-                "modelId": default_model_id(),
-                "usingIamRole": not env_secrets_set,
-            }
-        )
-
-    @app.post("/api/bedrock/invoke")
-    def bedrock_invoke():
-        if boto3 is None:
-            return jsonify({"error": "Server missing the boto3 dependency."}), 500
-
-        data = request.get_json(silent=True) or {}
-        model_id = data.get("modelId") or default_model_id()
-        messages = data.get("messages")
-        if not isinstance(messages, list) or not messages:
-            return jsonify({"error": "A non-empty 'messages' list is required."}), 400
-
-        inference_config = data.get("inferenceConfig") or {}
-        try:
-            temperature = float(inference_config.get("temperature", 0.7))
-            max_tokens = int(inference_config.get("maxTokens", 1024))
-        except (TypeError, ValueError):
-            temperature, max_tokens = 0.7, 1024
-
-        try:
-            client = get_bedrock_client()
-            response = client.converse(
-                modelId=model_id,
-                messages=messages,
-                inferenceConfig={"temperature": temperature, "maxTokens": max_tokens},
-            )
-        except (ClientError, BotoCoreError) as exc:
-            return bedrock_error_response(exc)
-        except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": str(exc)}), 500
-
-        output = response.get("output", {})
-        message = output.get("message", {})
-        content = message.get("content", [])
-        text = "".join(block.get("text", "") for block in content if block.get("text"))
-        return jsonify({"text": text, "modelId": model_id})
-
     @app.post("/api/bedrock/integrate-notes")
     def integrate_notes():
-        if boto3 is None:
-            return jsonify({"error": "Server missing the boto3 dependency."}), 500
-
         if "file" not in request.files:
             return jsonify({"error": "A multipart 'file' field is required."}), 400
 
@@ -249,25 +169,12 @@ def create_app():
         except json.JSONDecodeError:
             return jsonify({"error": "existingNotesJson and foldersJson must be valid JSON."}), 400
 
-        model_id = request.form.get("modelId") or default_model_id()
         prompt = _build_notes_prompt(file_name, file_text[:12000], existing_notes, folders)
 
         try:
-            client = get_bedrock_client()
-            response = client.converse(
-                modelId=model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                inferenceConfig={"temperature": 0.2, "maxTokens": 2048},
-            )
-        except (ClientError, BotoCoreError) as exc:
-            return bedrock_error_response(exc)
+            llm_text = complete([{"role": "user", "content": prompt}])
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": str(exc)}), 500
-
-        output = response.get("output", {})
-        message = output.get("message", {})
-        content = message.get("content", [])
-        llm_text = "".join(block.get("text", "") for block in content if block.get("text"))
+            return jsonify({"error": str(exc)}), 502
 
         result = _parse_notes_response(llm_text)
         if not result:
@@ -277,9 +184,6 @@ def create_app():
 
     @app.post("/api/bedrock/integrate-text")
     def integrate_text():
-        if boto3 is None:
-            return jsonify({"error": "Server missing the boto3 dependency."}), 500
-
         data = request.get_json(silent=True) or {}
         text = str(data.get("text") or "").strip()
         if not text:
@@ -290,31 +194,88 @@ def create_app():
         if not isinstance(existing_notes, list) or not isinstance(folders, list):
             return jsonify({"error": "existingNotes and folders must be JSON arrays."}), 400
 
-        model_id = data.get("modelId") or default_model_id()
         prompt = _build_notes_prompt("Clipped text", text[:12000], existing_notes, folders)
 
         try:
-            client = get_bedrock_client()
-            response = client.converse(
-                modelId=model_id,
-                messages=[{"role": "user", "content": [{"text": prompt}]}],
-                inferenceConfig={"temperature": 0.2, "maxTokens": 2048},
-            )
-        except (ClientError, BotoCoreError) as exc:
-            return bedrock_error_response(exc)
+            llm_text = complete([{"role": "user", "content": prompt}])
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": str(exc)}), 500
-
-        output = response.get("output", {})
-        message = output.get("message", {})
-        content = message.get("content", [])
-        llm_text = "".join(block.get("text", "") for block in content if block.get("text"))
+            return jsonify({"error": str(exc)}), 502
 
         result = _parse_notes_response(llm_text)
         if not result:
             return jsonify({"error": "Model returned an unparseable response.", "raw": llm_text}), 502
 
         return jsonify(result)
+
+    # ---- AI TUTOR (RAG) ENDPOINTS ----
+
+    @app.post("/api/tutor/ask")
+    def tutor_ask():
+        """Ask the RAG tutor a question. Model/settings come from the .env file only."""
+        data = request.get_json(force=True)
+        student_id = data.get("student_id", "anonymous")
+        question = data.get("question", "")
+        language = data.get("language", "English")
+
+        if not question.strip():
+            return jsonify({"error": "question is required"}), 400
+
+        history = _get_history(student_id)
+        try:
+            answer = ask_tutor(question, language=language, history=history)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 502
+
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": answer})
+
+        return jsonify({"answer": answer})
+
+    @app.post("/api/tutor/evaluate")
+    def tutor_evaluate():
+        """Grade a student's answer against a correct answer."""
+        data = request.get_json(force=True)
+        question = data.get("question", "")
+        correct_answer = data.get("correct_answer", "")
+        student_answer = data.get("student_answer", "")
+
+        if not question or not correct_answer:
+            return jsonify({"error": "question and correct_answer are required"}), 400
+
+        try:
+            result = evaluate_answer(question, correct_answer, student_answer)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 502
+        return jsonify(result)
+
+    @app.post("/api/tutor/practice-question")
+    def tutor_practice_question():
+        """Generate a new practice question for a concept."""
+        data = request.get_json(force=True)
+        student_id = data.get("student_id", "anonymous")
+        concept = data.get("concept", "")
+        difficulty = data.get("difficulty", "medium")
+        language = data.get("language", "English")
+
+        if not concept.strip():
+            return jsonify({"error": "concept is required"}), 400
+
+        try:
+            result = generate_practice_question(concept, difficulty=difficulty, language=language)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 502
+
+        _pending_questions[student_id] = result
+        return jsonify(result)
+
+    @app.post("/api/tutor/reset-history")
+    def tutor_reset_history():
+        """Clear a student's conversation history."""
+        data = request.get_json(force=True)
+        student_id = data.get("student_id", "anonymous")
+        _conversation_histories.pop(student_id, None)
+        _pending_questions.pop(student_id, None)
+        return jsonify({"status": "cleared"})
 
     return app
 

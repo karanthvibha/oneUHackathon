@@ -300,6 +300,14 @@ h1 {
   padding: 8px 12px;
 }
 
+.tutor-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .head-side {
   display: flex;
   flex-direction: column;
