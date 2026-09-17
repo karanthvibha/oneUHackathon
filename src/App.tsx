@@ -678,10 +678,51 @@ export default function App() {
     event.preventDefault()
     const text = capture.trim()
     if (!text) return
-    addNoteToFolder(titleFromBody(text), text, INBOX)
-    setCapture('')
-    setCaptureStatus('Saved to Smart Notes → Inbox')
-    window.setTimeout(() => setCaptureStatus(''), 2500)
+
+    setCaptureStatus('Formatting clip with Amazon Bedrock…')
+
+    fetch(`${BACKEND_URL}/api/bedrock/integrate-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        existingNotes: notes,
+        folders,
+        modelId: bedrockModelId.trim() || undefined,
+      }),
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(data?.error || `Request failed (${response.status})`)
+        }
+        return data as { targetTitle?: string; body?: string }
+      })
+      .then((data) => {
+        const body = String(data.body ?? '').trim()
+        if (!body) throw new Error('The model returned an empty note.')
+        const targetTitle = String(data.targetTitle ?? '').trim()
+        const targetKey = targetTitle.toLowerCase()
+
+        setNotes((prev) => {
+          const existing = prev.find((n) => n.title.trim().toLowerCase() === targetKey)
+          if (existing) {
+            return prev.map((n) => (n.id === existing.id ? { ...n, body } : n))
+          }
+          const title = targetTitle || titleFromBody(text)
+          return [{ id: Date.now(), title, body, folderId: INBOX }, ...prev]
+        })
+
+        setCapture('')
+        setCaptureStatus(`Saved to Smart Notes → ${targetTitle || titleFromBody(text)}`)
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        setCaptureStatus(`Could not save clip: ${message}`)
+      })
+      .finally(() => {
+        window.setTimeout(() => setCaptureStatus(''), 8000)
+      })
   }
 
   function integrateMaterialToNotes(material: Material) {
@@ -1454,6 +1495,7 @@ export default function App() {
                 Send
               </button>
             </form>
+            <CaptureButton />
           </section>
         )}
 

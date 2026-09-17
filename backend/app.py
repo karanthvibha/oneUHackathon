@@ -275,6 +275,47 @@ def create_app():
 
         return jsonify(result)
 
+    @app.post("/api/bedrock/integrate-text")
+    def integrate_text():
+        if boto3 is None:
+            return jsonify({"error": "Server missing the boto3 dependency."}), 500
+
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "A non-empty 'text' field is required."}), 400
+
+        existing_notes = data.get("existingNotes") or []
+        folders = data.get("folders") or []
+        if not isinstance(existing_notes, list) or not isinstance(folders, list):
+            return jsonify({"error": "existingNotes and folders must be JSON arrays."}), 400
+
+        model_id = data.get("modelId") or default_model_id()
+        prompt = _build_notes_prompt("Clipped text", text[:12000], existing_notes, folders)
+
+        try:
+            client = get_bedrock_client()
+            response = client.converse(
+                modelId=model_id,
+                messages=[{"role": "user", "content": [{"text": prompt}]}],
+                inferenceConfig={"temperature": 0.2, "maxTokens": 2048},
+            )
+        except (ClientError, BotoCoreError) as exc:
+            return bedrock_error_response(exc)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
+
+        output = response.get("output", {})
+        message = output.get("message", {})
+        content = message.get("content", [])
+        llm_text = "".join(block.get("text", "") for block in content if block.get("text"))
+
+        result = _parse_notes_response(llm_text)
+        if not result:
+            return jsonify({"error": "Model returned an unparseable response.", "raw": llm_text}), 502
+
+        return jsonify(result)
+
     return app
 
 
