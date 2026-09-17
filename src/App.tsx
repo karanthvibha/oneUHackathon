@@ -21,7 +21,7 @@ const PdfPreview = lazy(() => import('./PdfPreview'))
 
 type View = 'tutor' | 'plan' | 'notes' | 'files'
 
-type Message = { id: number; role: 'ai' | 'you'; text: string }
+type Message = { id: number; role: 'ai' | 'you'; text: string; translatedText?: string }
 type Folder = { id: string; name: string }
 type Note = { id: number; title: string; body: string; folderId: string }
 type Material = {
@@ -372,7 +372,10 @@ export default function App() {
   const editingNote = notes.find((n) => n.id === editingId) ?? null
   const selectedCount = selectedIds.length
   const selectedMaterialCount = selectedMaterialIds.length
-  const languageName = languages.find((l) => l.value === targetLanguage)?.name ?? 'English'
+  const selectedLanguage = languages.find((l) => l.value === targetLanguage)
+  const languageName = selectedLanguage?.name ?? 'English'
+  const languageLabel = selectedLanguage?.label ?? 'English'
+  const showTranslation = targetLanguage !== 'en'
   const visibleMaterials = useMemo(() => {
     const q = materialQuery.trim().toLowerCase()
     return materials
@@ -421,6 +424,32 @@ export default function App() {
 
   const focusStreak = useMemo(() => computeStreak(completedQuizDates), [completedQuizDates])
 
+  async function translateText(text: string): Promise<string> {
+    const response = await fetch(`${BACKEND_URL}/api/tutor/translate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, language: languageName }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data?.error || `Translation failed (${response.status})`)
+    return String(data?.translation ?? '').trim() || text
+  }
+
+  function appendAiMessage(text: string) {
+    const id = Date.now() + 1
+    const message: Message = { id, role: 'ai', text }
+    setMessages((prev) => [...prev, message])
+    if (showTranslation) {
+      translateText(text)
+        .then((translatedText) => {
+          setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, translatedText } : m)))
+        })
+        .catch(() => {
+          // Keep the English text as the fallback if translation fails.
+        })
+    }
+  }
+
   async function sendTutor(event: FormEvent) {
     event.preventDefault()
     const text = draft.trim()
@@ -440,7 +469,7 @@ export default function App() {
               student_id: 'demo',
               concept: text,
               difficulty: 'medium',
-              language: languageName,
+              language: 'English',
             }),
           })
           const data = await response.json().catch(() => ({}))
@@ -450,14 +479,7 @@ export default function App() {
           if (questionText) {
             setPendingQuestion({ question_text: questionText, correct_answer: correctAnswer })
           }
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now() + 1,
-              role: 'ai',
-              text: questionText || 'Sorry — I couldn’t generate a question. Try again.',
-            },
-          ])
+          appendAiMessage(questionText || 'Sorry — I couldn’t generate a question. Try again.')
         } else {
           // Grade the student's answer.
           const response = await fetch(`${BACKEND_URL}/api/tutor/evaluate`, {
@@ -474,32 +496,18 @@ export default function App() {
           const correct = Boolean(data?.correct)
           const feedback = String(data?.feedback ?? '').trim()
           setPendingQuestion(null)
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now() + 1,
-              role: 'ai',
-              text: `${correct ? '✅ Correct!' : '❌ Not quite.'} ${feedback}`.trim(),
-            },
-          ])
+          appendAiMessage(`${correct ? '✅ Correct!' : '❌ Not quite.'} ${feedback}`.trim())
         }
       } else {
         const response = await fetch(`${BACKEND_URL}/api/tutor/ask`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ student_id: 'demo', question: text, language: languageName }),
+          body: JSON.stringify({ student_id: 'demo', question: text, language: 'English' }),
         })
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
         const answer = String(data?.answer ?? '').trim()
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now() + 1,
-            role: 'ai',
-            text: answer || 'Sorry — I got an empty reply. Try asking again.',
-          },
-        ])
+        appendAiMessage(answer || 'Sorry — I got an empty reply. Try asking again.')
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -712,11 +720,11 @@ export default function App() {
     setPendingQuestion(null)
   }
 
-  function renderChat() {
+  function renderChat(translated: boolean) {
     return messages.map((m) => (
-      <article key={m.id} className={`bubble ${m.role}`}>
+      <article key={`${translated ? 'translated' : 'original'}-${m.id}`} className={`bubble ${m.role}`}>
         <span>{m.role === 'ai' ? tutorName : 'You'}</span>
-        <p>{m.text}</p>
+        <p>{translated && m.role === 'ai' ? m.translatedText ?? m.text : m.text}</p>
       </article>
     ))
   }
@@ -1229,7 +1237,7 @@ export default function App() {
               <div className="head-side">
                 <div className="tutor-tools">
                   <label className="tutor-lang" htmlFor="tutor-lang">
-                    <span>Respond in</span>
+                    <span>Translate to</span>
                     <select
                       id="tutor-lang"
                       value={targetLanguage}
@@ -1253,12 +1261,21 @@ export default function App() {
                 </div>
               </div>
             </header>
-            <div className="chat-layout">
+            <div className={`chat-layout${showTranslation ? ' split' : ''}`}>
               <div className="chat-col">
+                {showTranslation && <p className="chat-col-label">English</p>}
                 <div className="chat" aria-live="polite">
-                  {renderChat()}
+                  {renderChat(false)}
                 </div>
               </div>
+              {showTranslation && (
+                <div className="chat-col">
+                  <p className="chat-col-label">{languageLabel}</p>
+                  <div className="chat" aria-live="polite">
+                    {renderChat(true)}
+                  </div>
+                </div>
+              )}
             </div>
             <form className="composer" onSubmit={sendTutor}>
               <input

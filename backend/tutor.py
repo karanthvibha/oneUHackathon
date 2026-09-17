@@ -279,3 +279,16 @@ Difficulty: {difficulty}"""
 
     return result
 
+
+def translate_text(text: str, language: str) -> str:
+    """
+    Translate English text into the target language using the shared model.
+    Returns only the translated text, with no commentary.
+    """
+    system_prompt = (
+        "You are a translator. Translate the text from English into the target language. "
+        "Respond with ONLY the translated text — no explanations, notes, or quotes."
+    )
+    user_prompt = f"Translate this into {language}:\n\n{text}"
+    return complete([{"role": "user", "content": user_prompt}], system_prompt=system_prompt)
+

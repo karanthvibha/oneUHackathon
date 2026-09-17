@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from llm import complete
-from tutor import ask_tutor, evaluate_answer, generate_practice_question
+from tutor import ask_tutor, evaluate_answer, generate_practice_question, translate_text
 
 # ---- PER-STUDENT TUTOR SESSION STATE ----
 # In-memory storage: {student_id: [{"role": ..., "content": ...}, ...]}
@@ -276,6 +276,23 @@ def create_app():
         _conversation_histories.pop(student_id, None)
         _pending_questions.pop(student_id, None)
         return jsonify({"status": "cleared"})
+
+    @app.post("/api/tutor/translate")
+    def tutor_translate():
+        """Translate English text into the target language using the shared model."""
+        data = request.get_json(force=True)
+        text = data.get("text", "")
+        language = data.get("language", "English")
+
+        if not text.strip():
+            return jsonify({"error": "text is required"}), 400
+
+        try:
+            translation = translate_text(text, language)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 502
+
+        return jsonify({"translation": translation})
 
     return app
 
