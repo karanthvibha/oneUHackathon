@@ -647,6 +647,13 @@ export default function App() {
     setShowFolderForm(false)
   }
 
+  function deleteFolder(id: string) {
+    if (id === INBOX) return
+    setNotes((prev) => prev.map((n) => (n.folderId === id ? { ...n, folderId: INBOX } : n)))
+    setFolders((prev) => prev.filter((f) => f.id !== id))
+    if (activeFolder === id) setActiveFolder(ALL)
+  }
+
   function deleteNote(id: number) {
     setNotes((prev) => prev.filter((n) => n.id !== id))
     setSelectedIds((prev) => prev.filter((n) => n !== id))
@@ -729,8 +736,27 @@ export default function App() {
     ))
   }
 
+  function uploadToTutor(material: Material) {
+    if (!material.file) return
+    const form = new FormData()
+    form.append('file', material.file)
+    form.append('doc_id', String(material.id))
+    void fetch(`${BACKEND_URL}/api/tutor/upload`, { method: 'POST', body: form }).catch(() => {
+      // Non-blocking: the tutor still works even if this upload fails.
+    })
+  }
+
+  function removeFromTutor(id: number) {
+    void fetch(`${BACKEND_URL}/api/tutor/remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_id: String(id) }),
+    }).catch(() => {})
+  }
+
   function deleteMaterial(id: number) {
     void deleteFileBlob(id)
+    removeFromTutor(id)
     setMaterials((prev) => prev.filter((m) => m.id !== id))
     setSelectedMaterialIds((prev) => prev.filter((n) => n !== id))
     setMaterialMenuId(null)
@@ -757,7 +783,10 @@ export default function App() {
   }
 
   function deleteSelectedMaterials() {
-    selectedMaterialIds.forEach((id) => void deleteFileBlob(id))
+    selectedMaterialIds.forEach((id) => {
+      void deleteFileBlob(id)
+      removeFromTutor(id)
+    })
     setMaterials((prev) => prev.filter((m) => !selectedMaterialIds.includes(m.id)))
     setSelectedMaterialIds([])
   }
@@ -809,6 +838,13 @@ export default function App() {
     setShowMaterialFolderForm(false)
   }
 
+  function deleteMaterialFolder(id: string) {
+    if (id === INBOX) return
+    setMaterials((prev) => prev.map((m) => (m.folderId === id ? { ...m, folderId: INBOX } : m)))
+    setMaterialFolders((prev) => prev.filter((f) => f.id !== id))
+    if (materialFolder === id) setMaterialFolder(ALL)
+  }
+
   function handleFiles(files: FileList | File[]) {
     const folderId = materialFolder === ALL ? INBOX : materialFolder
     const allowed: File[] = []
@@ -834,7 +870,10 @@ export default function App() {
       }))
       setMaterials((prev) => [...newMaterials, ...prev])
       newMaterials.forEach((material) => {
-        if (material.file) void saveFileBlob(material.id, material.file)
+        if (material.file) {
+          void saveFileBlob(material.id, material.file)
+          uploadToTutor(material)
+        }
       })
       setUploadDate('')
     }
@@ -1374,21 +1413,33 @@ export default function App() {
                   All files
                 </button>
                 {materialFolders.map((folder) => (
-                  <button
-                    key={folder.id}
-                    type="button"
-                    className={`folder${materialFolder === folder.id ? ' active' : ''}${materialDropFolder === folder.id ? ' drop-over' : ''}`}
-                    onClick={() => setMaterialFolder(folder.id)}
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                      setMaterialDropFolder(folder.id)
-                    }}
-                    onDragLeave={() => setMaterialDropFolder(null)}
-                    onDrop={(e) => dropOnFolder(e, folder.id, 'material')}
-                  >
-                    {folder.name}
-                    <em>{materials.filter((m) => m.folderId === folder.id).length}</em>
-                  </button>
+                  <div className="folder-row" key={folder.id}>
+                    <button
+                      type="button"
+                      className={`folder${materialFolder === folder.id ? ' active' : ''}${materialDropFolder === folder.id ? ' drop-over' : ''}`}
+                      onClick={() => setMaterialFolder(folder.id)}
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        setMaterialDropFolder(folder.id)
+                      }}
+                      onDragLeave={() => setMaterialDropFolder(null)}
+                      onDrop={(e) => dropOnFolder(e, folder.id, 'material')}
+                    >
+                      {folder.name}
+                      <em>{materials.filter((m) => m.folderId === folder.id).length}</em>
+                    </button>
+                    {folder.id !== INBOX && (
+                      <button
+                        className="folder-delete"
+                        type="button"
+                        aria-label={`Delete folder ${folder.name}`}
+                        title="Delete folder"
+                        onClick={() => deleteMaterialFolder(folder.id)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                 ))}
                 {showMaterialFolderForm ? (
                   <form className="folder-create" onSubmit={createMaterialFolder}>
@@ -1669,21 +1720,33 @@ export default function App() {
                     All notes
                   </button>
                   {folders.map((folder) => (
-                    <button
-                      key={folder.id}
-                      type="button"
-                      className={`folder${activeFolder === folder.id ? ' active' : ''}${noteDropFolder === folder.id ? ' drop-over' : ''}`}
-                      onClick={() => setActiveFolder(folder.id)}
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                        setNoteDropFolder(folder.id)
-                      }}
-                      onDragLeave={() => setNoteDropFolder(null)}
-                      onDrop={(e) => dropOnFolder(e, folder.id, 'note')}
-                    >
-                      {folder.name}
-                      <em>{notes.filter((n) => n.folderId === folder.id).length}</em>
-                    </button>
+                    <div className="folder-row" key={folder.id}>
+                      <button
+                        type="button"
+                        className={`folder${activeFolder === folder.id ? ' active' : ''}${noteDropFolder === folder.id ? ' drop-over' : ''}`}
+                        onClick={() => setActiveFolder(folder.id)}
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          setNoteDropFolder(folder.id)
+                        }}
+                        onDragLeave={() => setNoteDropFolder(null)}
+                        onDrop={(e) => dropOnFolder(e, folder.id, 'note')}
+                      >
+                        {folder.name}
+                        <em>{notes.filter((n) => n.folderId === folder.id).length}</em>
+                      </button>
+                      {folder.id !== INBOX && (
+                        <button
+                          className="folder-delete"
+                          type="button"
+                          aria-label={`Delete folder ${folder.name}`}
+                          title="Delete folder"
+                          onClick={() => deleteFolder(folder.id)}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   ))}
                   {showFolderForm ? (
                     <form className="folder-create" onSubmit={createFolder}>

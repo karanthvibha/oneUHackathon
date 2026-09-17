@@ -7,7 +7,14 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from llm import complete
-from tutor import ask_tutor, evaluate_answer, generate_practice_question, translate_text
+from tutor import (
+    add_document,
+    ask_tutor,
+    evaluate_answer,
+    generate_practice_question,
+    remove_document,
+    translate_text,
+)
 
 # ---- PER-STUDENT TUTOR SESSION STATE ----
 # In-memory storage: {student_id: [{"role": ..., "content": ...}, ...]}
@@ -293,6 +300,35 @@ def create_app():
             return jsonify({"error": str(exc)}), 502
 
         return jsonify({"translation": translation})
+
+    @app.post("/api/tutor/upload")
+    def tutor_upload():
+        """Register a file so the tutor retrieves from it (trains on Files-tab content)."""
+        if "file" not in request.files:
+            return jsonify({"error": "A multipart 'file' field is required."}), 400
+
+        file_storage = request.files["file"]
+        doc_id = (request.form.get("doc_id") or "").strip() or os.urandom(8).hex()
+        file_name = file_storage.filename or "material"
+        file_text = extract_text_from_upload(file_storage)
+        if not file_text:
+            return jsonify({"error": "Could not extract readable text from this file."}), 400
+
+        add_document(doc_id, file_name, file_text)
+        return jsonify(
+            {"status": "added", "doc_id": doc_id, "filename": file_name, "chars": len(file_text)}
+        )
+
+    @app.post("/api/tutor/remove")
+    def tutor_remove():
+        """Remove a previously uploaded file from the tutor's retrieval."""
+        data = request.get_json(force=True)
+        doc_id = str(data.get("doc_id") or "").strip()
+        if not doc_id:
+            return jsonify({"error": "doc_id is required"}), 400
+
+        removed = remove_document(doc_id)
+        return jsonify({"status": "removed" if removed else "not_found"})
 
     return app
 

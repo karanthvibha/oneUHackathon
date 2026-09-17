@@ -1010,6 +1010,37 @@ textarea {
   background: #ffecec;
 }
 
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.folder-row .folder {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-delete {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.folder-delete:hover {
+  background: var(--ink-soft);
+  color: var(--ink);
+}
+
 .folder-create {
   display: flex;
   flex-direction: column;

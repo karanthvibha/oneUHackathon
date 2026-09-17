@@ -43,13 +43,53 @@ CONFIRMATION_WORDS = {
 
 # ---- LOCAL RAG ----
 _CHUNKS_CACHE = None  # loaded once per run, reused across calls
+_DOCUMENTS: dict[str, tuple[str, str]] = {}  # doc_id -> (filename, text)
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Split text into paragraph-sized chunks, applying the same filters as PDF loading."""
+    chunks = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        paragraph = paragraph.strip()
+        if len(paragraph) < MIN_CHUNK_LENGTH:
+            continue
+        # Skip live lecture poll/quiz slides (e.g. PollEverywhere)
+        # so we never leak real quiz questions/answers to students.
+        if re.search(r"pollev\.com|poll everywhere", paragraph, re.IGNORECASE):
+            continue
+        chunks.append(paragraph)
+    return chunks
+
+
+def add_document(doc_id: str, filename: str, text: str) -> None:
+    """Register an uploaded document so the tutor retrieves from it."""
+    global _CHUNKS_CACHE
+    _DOCUMENTS[doc_id] = (filename, text)
+    _CHUNKS_CACHE = None
+
+
+def remove_document(doc_id: str) -> bool:
+    """Remove a previously-added document. Returns True if it existed."""
+    global _CHUNKS_CACHE
+    if doc_id in _DOCUMENTS:
+        del _DOCUMENTS[doc_id]
+        _CHUNKS_CACHE = None
+        return True
+    return False
+
+
+def clear_documents() -> None:
+    """Remove all uploaded documents."""
+    global _CHUNKS_CACHE
+    _DOCUMENTS.clear()
+    _CHUNKS_CACHE = None
 
 
 def _load_chunks() -> list[str]:
     """
-    Extract text from every PDF in MATERIALS_FOLDER and split it into
-    paragraph-sized chunks. Cached after the first call so we don't
-    re-read the PDFs on every single question.
+    Extract text from every PDF in MATERIALS_FOLDER plus any uploaded
+    documents, and split it into paragraph-sized chunks. Cached after the
+    first call so we don't re-read on every single question.
     """
     global _CHUNKS_CACHE
     if _CHUNKS_CACHE is not None:
@@ -67,18 +107,13 @@ def _load_chunks() -> list[str]:
         try:
             reader = PdfReader(path)
             for page in reader.pages:
-                text = page.extract_text() or ""
-                for paragraph in re.split(r"\n\s*\n", text):
-                    paragraph = paragraph.strip()
-                    if len(paragraph) < MIN_CHUNK_LENGTH:
-                        continue
-                    # Skip live lecture poll/quiz slides (e.g. PollEverywhere)
-                    # so we never leak real quiz questions/answers to students.
-                    if re.search(r"pollev\.com|poll everywhere", paragraph, re.IGNORECASE):
-                        continue
-                    chunks.append(paragraph)
+                chunks.extend(_split_paragraphs(page.extract_text() or ""))
         except Exception as exc:  # noqa: BLE001 - a bad file shouldn't kill retrieval
             print(f"WARNING: could not read '{path}': {exc}")
+
+    # Include documents uploaded through the Files tab.
+    for _filename, text in _DOCUMENTS.values():
+        chunks.extend(_split_paragraphs(text))
 
     _CHUNKS_CACHE = chunks
     return chunks
