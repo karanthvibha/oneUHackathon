@@ -1041,6 +1041,166 @@ textarea {
   color: var(--ink);
 }
 
+.mastery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.mastery-card {
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+}
+
+.mastery-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mastery-card h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.mastery-level {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mastery-bar {
+  margin: 12px 0 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.mastery-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--sage);
+}
+
+.mastery-pct {
+  margin: 0;
+  font-weight: 700;
+}
+
+.mastery-meta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.mastery-weakest {
+  margin: 0 0 16px;
+}
+
+.quiz-modal {
+  max-width: 560px;
+  width: calc(100% - 32px);
+}
+
+.quiz-question h3 {
+  margin: 8px 0 16px;
+}
+
+.quiz-progress {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.quiz-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quiz-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-2);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quiz-choice-letter {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink-soft);
+  font-weight: 700;
+}
+
+.quiz-choice.correct {
+  border-color: var(--sage);
+  background: #e7f0e4;
+}
+
+.quiz-choice.wrong {
+  border-color: var(--coral);
+  background: #ffecec;
+}
+
+.quiz-feedback {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+
+.quiz-feedback p {
+  margin: 0 0 12px;
+}
+
+.quiz-result {
+  text-align: center;
+  padding: 16px 0;
+}
+
+.quiz-score {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0 0 16px;
+}
+
+.plan-quiz-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.plan-quiz-settings label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.plan-quiz-settings input {
+  width: 70px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+}
+
 .folder-create {
   display: flex;
   flex-direction: column;

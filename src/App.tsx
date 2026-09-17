@@ -19,11 +19,28 @@ import {
 
 const PdfPreview = lazy(() => import('./PdfPreview'))
 
-type View = 'tutor' | 'plan' | 'notes' | 'files'
+type View = 'tutor' | 'plan' | 'notes' | 'files' | 'mastery'
 
 type Message = { id: number; role: 'ai' | 'you'; text: string; translatedText?: string }
 type Folder = { id: string; name: string }
 type Note = { id: number; title: string; body: string; folderId: string }
+type MasteryEntry = {
+  mastery: number
+  level: string
+  trend: string
+  strategy: { difficulty: string; support: string; technique: string }
+}
+type QuizQuestion = { question: string; choices: string[]; answer: number; explanation: string }
+type Quiz = { title: string; questions: QuizQuestion[] }
+type QuizSession = {
+  materialId: number
+  planItemId: string
+  index: number
+  selection: number | null
+  score: number
+  results: boolean[]
+  finished: boolean
+}
 type Material = {
   id: number
   name: string
@@ -102,6 +119,7 @@ const navItems: { id: View; label: string; hint: string; icon: string }[] = [
   { id: 'plan', label: 'Study Plan', hint: 'This week’s path', icon: '▣' },
   { id: 'notes', label: 'Smart Notes', hint: 'Capture & connect', icon: '✎' },
   { id: 'files', label: 'Files', hint: 'Upload & organize', icon: '▤' },
+  { id: 'mastery', label: 'Concept Mastery', hint: 'Track your progress', icon: '◈' },
 ]
 
 const seedMaterialFolders: Folder[] = [{ id: INBOX, name: 'Inbox' }]
@@ -115,6 +133,9 @@ const languages = [
   { value: 'de', label: 'Deutsch', name: 'German' },
   { value: 'it', label: 'Italiano', name: 'Italian' },
   { value: 'pt', label: 'Português', name: 'Portuguese' },
+  { value: 'hi', label: 'हिन्दी', name: 'Hindi' },
+  { value: 'vi', label: 'Tiếng Việt', name: 'Vietnamese' },
+  { value: 'kn', label: 'ಕನ್ನಡ', name: 'Kannada' },
 ]
 
 const seedFolders: Folder[] = [{ id: INBOX, name: 'Inbox' }]
@@ -126,6 +147,10 @@ const seedPlanItems: PlanItem[] = []
 function titleFromBody(text: string) {
   const line = text.trim().split('\n')[0] ?? 'Untitled note'
   return line.slice(0, 48) || 'Untitled note'
+}
+
+function stripExtension(name: string): string {
+  return name.replace(/\.[^.]+$/, '')
 }
 
 function typeFromFileName(name: string) {
@@ -175,6 +200,11 @@ function formatIsoDate(d: Date) {
   return `${year}-${month}-${day}`
 }
 
+function quizDue(item: PlanItem): boolean {
+  if (item.kind !== 'quiz' || !item.date) return true
+  return item.date <= formatIsoDate(new Date())
+}
+
 function computeStreak(dates: string[]): number {
   const completed = new Set(dates)
   const cursor = new Date()
@@ -219,7 +249,7 @@ function makeQuizItemForMaterial(material: Material, due: Date = new Date()): Pl
   return {
     id: `quiz-${material.id}-${d.getTime()}`,
     day: d.toLocaleDateString(undefined, { weekday: 'short' }),
-    title: `Quiz: ${material.name}`,
+    title: `Quiz: ${stripExtension(material.name)}`,
     minutes: 20,
     done: false,
     materialId: material.id,
@@ -241,7 +271,6 @@ export default function App() {
   const [tutorBusy, setTutorBusy] = useState(false)
   const [capture, setCapture] = useState('')
   const [captureStatus, setCaptureStatus] = useState('')
-  const [noteIntegrationStatus, setNoteIntegrationStatus] = useState('')
   const [folders, setFolders] = useState<Folder[]>(() => loadJSON(FOLDERS_STORE_KEY, seedFolders))
   const [notes, setNotes] = useState<Note[]>(() => loadJSON(NOTES_STORE_KEY, seedNotes))
   const [query, setQuery] = useState('')
@@ -289,6 +318,10 @@ export default function App() {
       ? Math.round(stored)
       : DEFAULT_QUIZ_FREQUENCY_DAYS
   })
+  const [quizQuestionCount, setQuizQuestionCount] = useState<number>(() => {
+    const stored = Number(localStorage.getItem('quiz-question-count') ?? 5)
+    return Number.isFinite(stored) && stored >= 1 && stored <= 10 ? Math.round(stored) : 5
+  })
   const [showSettings, setShowSettings] = useState(false)
   const [nameDraft, setNameDraft] = useState(tutorName)
   const [frequencyDraft, setFrequencyDraft] = useState(quizFrequencyDays)
@@ -299,7 +332,31 @@ export default function App() {
   const [pendingQuestion, setPendingQuestion] = useState<{
     question_text: string
     correct_answer: string
+    concept: string
+    difficulty: string
   } | null>(null)
+  const [masteryProfile, setMasteryProfile] = useState<Record<string, MasteryEntry> | null>(null)
+  const [masteryWeakest, setMasteryWeakest] = useState<string | null>(null)
+  const [quizzes, setQuizzes] = useState<Record<number, Quiz>>({})
+  const [quizBusy, setQuizBusy] = useState<Record<number, boolean>>({})
+  const [quizSession, setQuizSession] = useState<QuizSession | null>(null)
+
+  useEffect(() => {
+    if (view !== 'mastery') return
+    let cancelled = false
+    fetch(`${BACKEND_URL}/api/personalization/mastery?student_id=demo`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!cancelled) {
+          setMasteryProfile(data.profile ?? {})
+          setMasteryWeakest(data.weakest_concept ?? null)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [view])
 
   // Hydrate persisted file blobs into material metadata.
   useEffect(() => {
@@ -319,6 +376,25 @@ export default function App() {
       cancelled = true
     }
   }, [])
+
+  // Remove stale study-plan items whose material no longer exists (e.g. from
+  // files that were deleted before cleanup was wired up).
+  useEffect(() => {
+    if (!materialsHydrated) return
+    const materialIds = new Set(materials.map((m) => m.id))
+    setPlanItems((prev) =>
+      prev
+        .filter((p) => p.materialId == null || materialIds.has(p.materialId))
+        .filter((p) => p.kind !== 'study')
+        .map((p) => {
+          // Normalize quiz items: fix kind + always drop the file extension.
+          if (p.kind === 'quiz' || p.title.startsWith('Quiz: ')) {
+            return { ...p, kind: 'quiz', title: stripExtension(p.title) }
+          }
+          return p
+        }),
+    )
+  }, [materialsHydrated, materials])
 
   useEffect(() => {
     saveJSON(FOLDERS_STORE_KEY, folders)
@@ -476,8 +552,15 @@ export default function App() {
           if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
           const questionText = String(data?.question_text ?? '').trim()
           const correctAnswer = String(data?.correct_answer ?? '').trim()
+          const concept = String(data?.concept ?? text).trim()
+          const difficulty = String(data?.difficulty ?? 'medium').trim()
           if (questionText) {
-            setPendingQuestion({ question_text: questionText, correct_answer: correctAnswer })
+            setPendingQuestion({
+              question_text: questionText,
+              correct_answer: correctAnswer,
+              concept,
+              difficulty,
+            })
           }
           appendAiMessage(questionText || 'Sorry — I couldn’t generate a question. Try again.')
         } else {
@@ -489,6 +572,9 @@ export default function App() {
               question: pendingQuestion.question_text,
               correct_answer: pendingQuestion.correct_answer,
               student_answer: text,
+              student_id: 'demo',
+              concept: pendingQuestion.concept,
+              difficulty: pendingQuestion.difficulty,
             }),
           })
           const data = await response.json().catch(() => ({}))
@@ -545,95 +631,10 @@ export default function App() {
     event.preventDefault()
     const text = capture.trim()
     if (!text) return
-
-    setCaptureStatus('Formatting clip with Amazon Bedrock…')
-
-    fetch(`${BACKEND_URL}/api/bedrock/integrate-text`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        existingNotes: notes,
-        folders,
-      }),
-    })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          throw new Error(data?.error || `Request failed (${response.status})`)
-        }
-        return data as { targetTitle?: string; body?: string }
-      })
-      .then((data) => {
-        const body = String(data.body ?? '').trim()
-        if (!body) throw new Error('The model returned an empty note.')
-        const targetTitle = String(data.targetTitle ?? '').trim()
-        const targetKey = targetTitle.toLowerCase()
-
-        setNotes((prev) => {
-          const existing = prev.find((n) => n.title.trim().toLowerCase() === targetKey)
-          if (existing) {
-            return prev.map((n) => (n.id === existing.id ? { ...n, body } : n))
-          }
-          const title = targetTitle || titleFromBody(text)
-          return [{ id: Date.now(), title, body, folderId: INBOX }, ...prev]
-        })
-
-        setCapture('')
-        setCaptureStatus(`Saved to Smart Notes → ${targetTitle || titleFromBody(text)}`)
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        setCaptureStatus(`Could not save clip: ${message}`)
-      })
-      .finally(() => {
-        window.setTimeout(() => setCaptureStatus(''), 8000)
-      })
-  }
-
-  function integrateMaterialToNotes(material: Material) {
-    if (!material.file) return
-
-    const file = material.file
-    setNoteIntegrationStatus(`Formatting "${material.name}" into Smart Notes…`)
-
-    const form = new FormData()
-    form.append('file', file)
-    form.append('existingNotesJson', JSON.stringify(notes))
-    form.append('foldersJson', JSON.stringify(folders))
-
-    fetch(`${BACKEND_URL}/api/bedrock/integrate-notes`, { method: 'POST', body: form })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          throw new Error(data?.error || `Request failed (${response.status})`)
-        }
-        return data as { targetTitle?: string; body?: string }
-      })
-      .then((data) => {
-        const body = String(data.body ?? '').trim()
-        if (!body) throw new Error('The model returned an empty note.')
-        const targetTitle = String(data.targetTitle ?? '').trim()
-        const targetKey = targetTitle.toLowerCase()
-
-        setNotes((prev) => {
-          const existing = prev.find((n) => n.title.trim().toLowerCase() === targetKey)
-          if (existing) {
-            return prev.map((n) => (n.id === existing.id ? { ...n, body } : n))
-          }
-          const title = targetTitle || 'Imported notes'
-          return [{ id: Date.now(), title, body, folderId: INBOX }, ...prev]
-        })
-
-        setNoteIntegrationStatus(`Added formatted notes for "${material.name}" to Smart Notes.`)
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        setNoteIntegrationStatus(`Could not integrate "${material.name}": ${message}`)
-      })
-      .finally(() => {
-        window.setTimeout(() => setNoteIntegrationStatus(''), 8000)
-      })
+    addNoteToFolder(titleFromBody(text), text, INBOX)
+    setCapture('')
+    setCaptureStatus('Saved to Smart Notes')
+    window.setTimeout(() => setCaptureStatus(''), 8000)
   }
 
   function createFolder(event: FormEvent) {
@@ -754,9 +755,25 @@ export default function App() {
     }).catch(() => {})
   }
 
+  function removePlanAndQuizForMaterial(id: number) {
+    setPlanItems((prev) => prev.filter((p) => p.materialId !== id))
+    setQuizzes((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setQuizBusy((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+    setQuizSession((prev) => (prev?.materialId === id ? null : prev))
+  }
+
   function deleteMaterial(id: number) {
     void deleteFileBlob(id)
     removeFromTutor(id)
+    removePlanAndQuizForMaterial(id)
     setMaterials((prev) => prev.filter((m) => m.id !== id))
     setSelectedMaterialIds((prev) => prev.filter((n) => n !== id))
     setMaterialMenuId(null)
@@ -786,6 +803,7 @@ export default function App() {
     selectedMaterialIds.forEach((id) => {
       void deleteFileBlob(id)
       removeFromTutor(id)
+      removePlanAndQuizForMaterial(id)
     })
     setMaterials((prev) => prev.filter((m) => !selectedMaterialIds.includes(m.id)))
     setSelectedMaterialIds([])
@@ -808,20 +826,10 @@ export default function App() {
       setMaterials((prev) =>
         prev.map((m) => (selectedMaterialIds.includes(m.id) ? { ...m, isStudyMaterial: true } : m)),
       )
-      targets.forEach((material) => void integrateMaterialToNotes(material))
-      const newItems: PlanItem[] = targets.flatMap((material) => {
-        const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
-        const review: PlanItem = {
-          id: `plan-${material.id}`,
-          day,
-          title: material.name,
-          minutes: 30,
-          done: false,
-          materialId: material.id,
-          kind: 'study',
-        }
-        return [review, makeQuizItemForMaterial(material)]
+      targets.forEach((material) => {
+        void generateQuiz(material)
       })
+      const newItems: PlanItem[] = targets.map((material) => makeQuizItemForMaterial(material))
       setPlanItems((prev) => [...newItems, ...prev])
     }
     setSelectedMaterialIds([])
@@ -918,19 +926,186 @@ export default function App() {
       setMaterials((prev) =>
         prev.map((m) => (m.id === material.id ? { ...m, isStudyMaterial: true } : m)),
       )
-      void integrateMaterialToNotes(material)
-      const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
-      const review: PlanItem = {
-        id: `plan-${material.id}`,
-        day,
-        title: material.name,
-        minutes: 30,
-        done: false,
-        materialId: material.id,
-        kind: 'study',
-      }
-      setPlanItems((prev) => [review, makeQuizItemForMaterial(material), ...prev])
+      void generateQuiz(material)
+      setPlanItems((prev) => [makeQuizItemForMaterial(material), ...prev])
     }
+  }
+
+  function generateQuiz(material: Material) {
+    if (!material.file || quizzes[material.id]) return
+    setQuizBusy((prev) => ({ ...prev, [material.id]: true }))
+    const form = new FormData()
+    form.append('file', material.file)
+    form.append('num_questions', String(quizQuestionCount))
+    fetch(`${BACKEND_URL}/api/quiz/generate`, { method: 'POST', body: form })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`)
+        return data as Quiz
+      })
+      .then((quiz) => {
+        setQuizzes((prev) => ({ ...prev, [material.id]: quiz }))
+      })
+      .catch(() => {
+        // Leave the quiz unset; clicking "Start quiz" will retry generation.
+      })
+      .finally(() => {
+        setQuizBusy((prev) => ({ ...prev, [material.id]: false }))
+      })
+  }
+
+  function openQuiz(item: PlanItem) {
+    if (item.materialId == null) return
+    const quiz = quizzes[item.materialId]
+    if (quiz && quiz.questions.length > 0) {
+      setQuizSession({
+        materialId: item.materialId,
+        planItemId: item.id,
+        index: 0,
+        selection: null,
+        score: 0,
+        results: [],
+        finished: false,
+      })
+      return
+    }
+    // Not ready yet — (re)generate it.
+    const material = materials.find((m) => m.id === item.materialId)
+    if (material && !quizBusy[item.materialId]) generateQuiz(material)
+  }
+
+  function answerQuiz(choiceIndex: number) {
+    setQuizSession((prev) => {
+      if (!prev || prev.selection != null) return prev
+      const quiz = quizzes[prev.materialId]
+      if (!quiz) return prev
+      const question = quiz.questions[prev.index]
+      const correct = choiceIndex === question.answer
+      return {
+        ...prev,
+        selection: choiceIndex,
+        score: prev.score + (correct ? 1 : 0),
+        results: [...prev.results, correct],
+      }
+    })
+  }
+
+  function nextQuizQuestion() {
+    setQuizSession((prev) => {
+      if (!prev) return prev
+      const quiz = quizzes[prev.materialId]
+      if (!quiz) return prev
+      if (prev.index + 1 >= quiz.questions.length) {
+        return { ...prev, finished: true }
+      }
+      return { ...prev, index: prev.index + 1, selection: null }
+    })
+  }
+
+  function finishQuiz() {
+    const session = quizSession
+    if (session) {
+      const item = planItems.find((p) => p.id === session.planItemId)
+      if (item) completePlanItem(item)
+
+      const material = materials.find((m) => m.id === session.materialId)
+      const concept = material ? stripExtension(material.name) : `material-${session.materialId}`
+      const interactions = session.results.map((correct) => ({
+        concept,
+        correct,
+        difficulty: 'medium',
+        attempts: 1,
+        hints_used: 0,
+      }))
+      if (interactions.length > 0) {
+        void fetch(`${BACKEND_URL}/api/personalization/record`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ student_id: 'demo', interactions }),
+        }).catch(() => {})
+      }
+    }
+    setQuizSession(null)
+  }
+
+  function closeQuiz() {
+    setQuizSession(null)
+  }
+
+  function QuizModal() {
+    if (!quizSession) return null
+    const quiz = quizzes[quizSession.materialId]
+    if (!quiz || quiz.questions.length === 0) return null
+    const total = quiz.questions.length
+    const question = quiz.questions[quizSession.index]
+
+    return (
+      <div className="modal-backdrop" role="presentation" onClick={closeQuiz}>
+        <div
+          className="modal quiz-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Quiz"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="modal-head">
+            <h2>{quiz.title || 'Quiz'}</h2>
+            <button className="modal-close" type="button" aria-label="Close quiz" onClick={closeQuiz}>
+              ×
+            </button>
+          </div>
+
+          {quizSession.finished ? (
+            <div className="quiz-result">
+              <p className="quiz-score">
+                You got {quizSession.score} of {total} correct.
+              </p>
+              <button className="btn btn-primary" type="button" onClick={finishQuiz}>
+                Finish
+              </button>
+            </div>
+          ) : (
+            <div className="quiz-question">
+              <p className="quiz-progress">
+                Question {quizSession.index + 1} of {total}
+              </p>
+              <h3>{question.question}</h3>
+              <div className="quiz-choices">
+                {question.choices.map((choice, i) => {
+                  const revealed = quizSession.selection != null
+                  const isCorrect = i === question.answer
+                  const isSelected = quizSession.selection === i
+                  let cls = 'quiz-choice'
+                  if (revealed && isCorrect) cls += ' correct'
+                  if (revealed && isSelected && !isCorrect) cls += ' wrong'
+                  if (isSelected) cls += ' selected'
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={cls}
+                      disabled={revealed}
+                      onClick={() => answerQuiz(i)}
+                    >
+                      <span className="quiz-choice-letter">{String.fromCharCode(65 + i)}</span>
+                      {choice}
+                    </button>
+                  )
+                })}
+              </div>
+              {quizSession.selection != null && (
+                <div className="quiz-feedback">
+                  <p>{question.explanation}</p>
+                  <button className="btn btn-primary" type="button" onClick={nextQuizQuestion}>
+                    {quizSession.index + 1 >= total ? 'See results' : 'Next question'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   function completePlanItem(item: PlanItem) {
@@ -1078,7 +1253,7 @@ export default function App() {
               id="capture"
               value={capture}
               onChange={(e) => setCapture(e.target.value)}
-              placeholder="Paste or write something worth keeping…"
+              placeholder="Type your own points or paste notes…"
               rows={4}
             />
             <div className="capture-row">
@@ -1353,6 +1528,34 @@ export default function App() {
                 <span>Space out heavier sessions across the week.</span>
               </p>
             </header>
+            <div className="plan-quiz-settings">
+              <label htmlFor="quiz-question-count">Questions per quiz</label>
+              <input
+                id="quiz-question-count"
+                type="number"
+                min={1}
+                max={10}
+                defaultValue={quizQuestionCount}
+                onChange={(e) => {
+                  const value = e.target.value
+                  const n = Number(value)
+                  if (value !== '' && Number.isFinite(n) && n >= 1 && n <= 10) {
+                    setQuizQuestionCount(Math.round(n))
+                    localStorage.setItem('quiz-question-count', String(Math.round(n)))
+                  }
+                }}
+                onBlur={(e) => {
+                  const n = Math.round(Number(e.target.value))
+                  if (Number.isFinite(n) && n >= 1 && n <= 10) {
+                    e.target.value = String(n)
+                    setQuizQuestionCount(n)
+                    localStorage.setItem('quiz-question-count', String(n))
+                  } else {
+                    e.target.value = String(quizQuestionCount)
+                  }
+                }}
+              />
+            </div>
             <ol className="plan">
               {visiblePlanItems.map((item) => (
                 <li key={item.id} className={item.done ? 'done' : undefined}>
@@ -1360,8 +1563,11 @@ export default function App() {
                   <div className="plan-body">
                     <strong>{item.title}</strong>
                     <p>
-                      {item.minutes} min
-                      {item.date ? ` · ${formatPlanDate(item.date)}` : ''}
+                      {item.kind === 'quiz'
+                        ? item.date
+                          ? formatPlanDate(item.date)
+                          : ''
+                        : `${item.minutes} min${item.date ? ` · ${formatPlanDate(item.date)}` : ''}`}
                     </p>
                     {lastReviewedLabel(item) && (
                       <p className="last-reviewed">{lastReviewedLabel(item)}</p>
@@ -1377,14 +1583,31 @@ export default function App() {
                         Snooze
                       </button>
                     )}
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={() => completePlanItem(item)}
-                      disabled={item.done}
-                    >
-                      {item.done ? 'Done' : 'Mark done'}
-                    </button>
+                    {item.kind === 'quiz' ? (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        type="button"
+                        disabled={item.done || !quizDue(item) || (item.materialId != null && quizBusy[item.materialId])}
+                        onClick={() => openQuiz(item)}
+                      >
+                        {item.done
+                          ? 'Done'
+                          : !quizDue(item)
+                            ? 'Not due yet'
+                            : item.materialId != null && quizBusy[item.materialId]
+                              ? 'Generating…'
+                              : 'Start quiz'}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        type="button"
+                        onClick={() => completePlanItem(item)}
+                        disabled={item.done}
+                      >
+                        {item.done ? 'Done' : 'Mark done'}
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
@@ -1666,7 +1889,6 @@ export default function App() {
               <div>
                 <p className="eyebrow">Smart Notes</p>
                 <h1>{editingNote ? 'Editor' : 'Ideas you can find again'}</h1>
-                {noteIntegrationStatus && <p className="integration-status">{noteIntegrationStatus}</p>}
               </div>
             </header>
 
@@ -1899,7 +2121,53 @@ export default function App() {
             )}
           </section>
         )}
+
+        {view === 'mastery' && (
+          <section className="panel mastery-panel">
+            <header className="panel-head">
+              <p className="eyebrow">Concept Mastery</p>
+              <h1>Your CS 2420 progress</h1>
+            </header>
+
+            {masteryWeakest && (
+              <p className="mastery-weakest">
+                Focus next on: <strong>{masteryWeakest}</strong>
+              </p>
+            )}
+
+            {masteryProfile == null ? (
+              <p className="empty">Loading your mastery…</p>
+            ) : Object.keys(masteryProfile).length === 0 ? (
+              <p className="empty">
+                No mastery data yet — take some practice questions in the AI Tutor and your progress
+                will show up here.
+              </p>
+            ) : (
+              <div className="mastery-grid">
+                {Object.entries(masteryProfile).map(([concept, entry]) => (
+                  <article className="mastery-card" key={concept}>
+                    <div className="mastery-card-head">
+                      <h2>{concept}</h2>
+                      <span className="mastery-level">{entry.level}</span>
+                    </div>
+                    <div className="mastery-bar" aria-hidden>
+                      <div className="mastery-bar-fill" style={{ width: `${entry.mastery}%` }} />
+                    </div>
+                    <p className="mastery-pct">{entry.mastery}% mastery</p>
+                    <p className="mastery-meta">
+                      Trend: {entry.trend}
+                      <br />
+                      Next up: {entry.strategy.difficulty} · {entry.strategy.technique}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </main>
+
+      <QuizModal />
     </div>
   )
 }

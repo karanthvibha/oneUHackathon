@@ -327,3 +327,32 @@ def translate_text(text: str, language: str) -> str:
     user_prompt = f"Translate this into {language}:\n\n{text}"
     return complete([{"role": "user", "content": user_prompt}], system_prompt=system_prompt)
 
+
+def generate_quiz(text: str, title: str, num_questions: int = 5) -> dict:
+    """
+    Generate a multiple-choice quiz from study material using the shared model.
+    Returns {"title": ..., "questions": [{"question", "choices", "answer", "explanation"}]}.
+    """
+    system_prompt = (
+        "You are a CS 2420 instructor creating a multiple-choice quiz from study material. "
+        "Respond with STRICT JSON only, in exactly this shape: "
+        '{"title": "...", "questions": [{"question": "...", '
+        '"choices": ["...", "...", "...", "..."], "answer": 0, "explanation": "..."}]}. '
+        '"answer" is the 0-based index of the correct choice. Include exactly 4 choices per question.'
+    )
+    user_prompt = (
+        f"Study material (title: {title}):\n\n{text[:12000]}\n\n"
+        f"Create {num_questions} multiple-choice questions that test understanding of this material."
+    )
+    raw = complete([{"role": "user", "content": user_prompt}], system_prompt=system_prompt)
+    raw = raw.replace("```json", "").replace("```", "").strip()
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"title": title, "questions": []}
+
+    result.setdefault("title", title)
+    result.setdefault("questions", [])
+    return result
+

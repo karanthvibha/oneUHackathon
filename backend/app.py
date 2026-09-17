@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+import sys
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -12,9 +13,19 @@ from tutor import (
     ask_tutor,
     evaluate_answer,
     generate_practice_question,
+    generate_quiz,
     remove_document,
     translate_text,
 )
+
+# Make the repo-level personalization package importable.
+_PERSONALIZATION_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "personalization"
+)
+if _PERSONALIZATION_DIR not in sys.path:
+    sys.path.insert(0, _PERSONALIZATION_DIR)
+
+from student_profile import build_student_profile, get_weakest_concept  # noqa: E402
 
 # ---- PER-STUDENT TUTOR SESSION STATE ----
 # In-memory storage: {student_id: [{"role": ..., "content": ...}, ...]}
@@ -22,10 +33,15 @@ from tutor import (
 # a real app would store this in a database instead.
 _conversation_histories: dict[str, list[dict]] = {}
 _pending_questions: dict[str, dict] = {}  # {student_id: question_dict}
+_interactions: dict[str, list[dict]] = {}  # {student_id: [interaction, ...]}
 
 
 def _get_history(student_id: str) -> list[dict]:
     return _conversation_histories.setdefault(student_id, [])
+
+
+def _get_interactions(student_id: str) -> list[dict]:
+    return _interactions.setdefault(student_id, [])
 
 
 def _load_env():
@@ -240,11 +256,14 @@ def create_app():
 
     @app.post("/api/tutor/evaluate")
     def tutor_evaluate():
-        """Grade a student's answer against a correct answer."""
+        """Grade a student's answer against a correct answer and record a mastery interaction."""
         data = request.get_json(force=True)
         question = data.get("question", "")
         correct_answer = data.get("correct_answer", "")
         student_answer = data.get("student_answer", "")
+        student_id = data.get("student_id", "demo")
+        concept = data.get("concept", "")
+        difficulty = data.get("difficulty", "medium")
 
         if not question or not correct_answer:
             return jsonify({"error": "question and correct_answer are required"}), 400
@@ -253,6 +272,18 @@ def create_app():
             result = evaluate_answer(question, correct_answer, student_answer)
         except Exception as exc:  # noqa: BLE001
             return jsonify({"error": str(exc)}), 502
+
+        if concept:
+            _get_interactions(student_id).append(
+                {
+                    "concept": concept,
+                    "correct": bool(result.get("correct")),
+                    "difficulty": difficulty,
+                    "attempts": 1,
+                    "hints_used": 0,
+                }
+            )
+
         return jsonify(result)
 
     @app.post("/api/tutor/practice-question")
@@ -329,6 +360,60 @@ def create_app():
 
         removed = remove_document(doc_id)
         return jsonify({"status": "removed" if removed else "not_found"})
+
+    @app.get("/api/personalization/mastery")
+    def personalization_mastery():
+        """Return the student's per-concept mastery profile."""
+        student_id = request.args.get("student_id", "demo")
+        interactions = _get_interactions(student_id)
+        profile = build_student_profile(interactions)
+        return jsonify(
+            {
+                "profile": profile,
+                "weakest_concept": get_weakest_concept(profile),
+                "total_interactions": len(interactions),
+            }
+        )
+
+    @app.post("/api/personalization/record")
+    def personalization_record():
+        """Append quiz interactions for mastery tracking."""
+        data = request.get_json(force=True)
+        student_id = data.get("student_id", "demo")
+        interactions = data.get("interactions", [])
+        if not isinstance(interactions, list):
+            return jsonify({"error": "interactions must be a list"}), 400
+
+        store = _get_interactions(student_id)
+        for interaction in interactions:
+            if isinstance(interaction, dict):
+                store.append(interaction)
+
+        return jsonify({"status": "recorded", "count": len(interactions)})
+
+    @app.post("/api/quiz/generate")
+    def quiz_generate():
+        """Generate a multiple-choice quiz from an uploaded file's content."""
+        if "file" not in request.files:
+            return jsonify({"error": "A multipart 'file' field is required."}), 400
+
+        file_storage = request.files["file"]
+        file_name = file_storage.filename or "material"
+        file_text = extract_text_from_upload(file_storage)
+        if not file_text:
+            return jsonify({"error": "Could not extract readable text from this file."}), 400
+
+        try:
+            num_questions = max(1, min(int(request.form.get("num_questions", "5")), 10))
+        except ValueError:
+            num_questions = 5
+
+        try:
+            quiz = generate_quiz(file_text, file_name, num_questions)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 502
+
+        return jsonify(quiz)
 
     return app
 
