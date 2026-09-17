@@ -1,4 +1,13 @@
-import { FormEvent, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import {
+  FormEvent,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from 'react'
 import './App.css'
 import {
   deleteFileBlob,
@@ -7,6 +16,8 @@ import {
   saveFileBlob,
   saveJSON,
 } from './persistence'
+
+const PdfPreview = lazy(() => import('./PdfPreview'))
 
 type View = 'tutor' | 'plan' | 'notes' | 'files'
 
@@ -36,6 +47,8 @@ type PlanItem = {
 
 const INBOX = 'inbox'
 const ALL = 'all'
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:5001'
 
 const DEFAULT_QUIZ_FREQUENCY_DAYS = 3
 
@@ -432,6 +445,7 @@ export default function App() {
   const [draft, setDraft] = useState('')
   const [capture, setCapture] = useState('')
   const [captureStatus, setCaptureStatus] = useState('')
+  const [noteIntegrationStatus, setNoteIntegrationStatus] = useState('')
   const [folders, setFolders] = useState<Folder[]>(() => loadJSON(FOLDERS_STORE_KEY, seedFolders))
   const [notes, setNotes] = useState<Note[]>(() => loadJSON(NOTES_STORE_KEY, seedNotes))
   const [query, setQuery] = useState('')
@@ -471,7 +485,6 @@ export default function App() {
   const [uploadError, setUploadError] = useState('')
   const [viewingMaterial, setViewingMaterial] = useState<Material | null>(null)
   const [viewText, setViewText] = useState('')
-  const [viewUrl, setViewUrl] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tutorName, setTutorName] = useState<string>(() => localStorage.getItem('tutor-name') ?? 'Tutor')
   const [model] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
@@ -671,6 +684,52 @@ export default function App() {
     window.setTimeout(() => setCaptureStatus(''), 2500)
   }
 
+  function integrateMaterialToNotes(material: Material) {
+    if (!material.file) return
+
+    const file = material.file
+    setNoteIntegrationStatus(`Formatting "${material.name}" into Smart Notes…`)
+
+    const form = new FormData()
+    form.append('file', file)
+    form.append('existingNotesJson', JSON.stringify(notes))
+    form.append('foldersJson', JSON.stringify(folders))
+    if (bedrockModelId.trim()) form.append('modelId', bedrockModelId.trim())
+
+    fetch(`${BACKEND_URL}/api/bedrock/integrate-notes`, { method: 'POST', body: form })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          throw new Error(data?.error || `Request failed (${response.status})`)
+        }
+        return data as { targetTitle?: string; body?: string }
+      })
+      .then((data) => {
+        const body = String(data.body ?? '').trim()
+        if (!body) throw new Error('The model returned an empty note.')
+        const targetTitle = String(data.targetTitle ?? '').trim()
+        const targetKey = targetTitle.toLowerCase()
+
+        setNotes((prev) => {
+          const existing = prev.find((n) => n.title.trim().toLowerCase() === targetKey)
+          if (existing) {
+            return prev.map((n) => (n.id === existing.id ? { ...n, body } : n))
+          }
+          const title = targetTitle || 'Imported notes'
+          return [{ id: Date.now(), title, body, folderId: INBOX }, ...prev]
+        })
+
+        setNoteIntegrationStatus(`Added formatted notes for "${material.name}" to Smart Notes.`)
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        setNoteIntegrationStatus(`Could not integrate "${material.name}": ${message}`)
+      })
+      .finally(() => {
+        window.setTimeout(() => setNoteIntegrationStatus(''), 8000)
+      })
+  }
+
   function createFolder(event: FormEvent) {
     event.preventDefault()
     const name = folderName.trim()
@@ -832,6 +891,7 @@ export default function App() {
       setMaterials((prev) =>
         prev.map((m) => (selectedMaterialIds.includes(m.id) ? { ...m, isStudyMaterial: true } : m)),
       )
+      targets.forEach((material) => void integrateMaterialToNotes(material))
       const newItems: PlanItem[] = targets.flatMap((material) => {
         const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
         const review: PlanItem = {
@@ -931,6 +991,7 @@ export default function App() {
       setMaterials((prev) =>
         prev.map((m) => (m.id === material.id ? { ...m, isStudyMaterial: true } : m)),
       )
+      void integrateMaterialToNotes(material)
       const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
       const review: PlanItem = {
         id: `plan-${material.id}`,
@@ -1001,65 +1062,62 @@ export default function App() {
   function openMaterialViewer(material: Material) {
     setMaterialMenuId(null)
     setViewingMaterial(material)
+    setViewText('')
+
     if (!material.file) {
-      setViewUrl('')
       setViewText('No stored source is available for this file.')
       return
     }
+
+    if (material.name.toLowerCase().endsWith('.pdf')) {
+      return
+    }
+
     if (previewKind(material.name) === 'text') {
       material.file
         .text()
         .then((text) => {
-          setViewUrl('')
           setViewText(text)
         })
         .catch(() => {
-          setViewUrl('')
           setViewText('This file could not be read as text.')
         })
     } else {
-      setViewText('')
-      setViewUrl(URL.createObjectURL(material.file))
+      setViewText('Preview is not available for this file type.')
     }
   }
 
   function closeMaterialViewer() {
-    if (viewUrl) URL.revokeObjectURL(viewUrl)
     setViewingMaterial(null)
     setViewText('')
-    setViewUrl('')
     setShowCapture(false)
   }
 
-  function MaterialViewerModal() {
+  function MaterialPreview() {
     if (!viewingMaterial) return null
+
+    const isPdf = viewingMaterial.name.toLowerCase().endsWith('.pdf')
+
     return (
-      <div className="modal-backdrop" role="presentation" onClick={closeMaterialViewer}>
-        <div
-          className="modal viewer-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Preview ${viewingMaterial.name}`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="modal-head">
-            <h2>{viewingMaterial.name}</h2>
-            <button
-              className="modal-close"
-              type="button"
-              aria-label="Close"
-              onClick={closeMaterialViewer}
-            >
-              ×
-            </button>
-          </div>
-          {viewUrl ? (
-            <iframe className="viewer-frame" title={viewingMaterial.name} src={viewUrl} />
-          ) : (
-            <pre className="viewer-text">{viewText || 'No preview available.'}</pre>
-          )}
-          <CaptureButton />
+      <div className="file-preview">
+        <div className="file-preview-head">
+          <h2>{viewingMaterial.name}</h2>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={closeMaterialViewer}
+          >
+            Close
+          </button>
         </div>
+        {isPdf && viewingMaterial.file ? (
+          <Suspense fallback={<p className="pdf-status">Loading PDF viewer…</p>}>
+            <PdfPreview file={viewingMaterial.file} />
+          </Suspense>
+        ) : (
+          <pre className="viewer-text">{viewText || 'No preview available.'}</pre>
+        )}
+        <CaptureButton />
       </div>
     )
   }
@@ -1705,7 +1763,7 @@ export default function App() {
               </div>
             </div>
             {showUpload && <MaterialUploadModal />}
-            {viewingMaterial && <MaterialViewerModal />}
+            {viewingMaterial && <MaterialPreview />}
           </section>
         )}
 
@@ -1715,6 +1773,7 @@ export default function App() {
               <div>
                 <p className="eyebrow">Smart Notes</p>
                 <h1>{editingNote ? 'Editor' : 'Ideas you can find again'}</h1>
+                {noteIntegrationStatus && <p className="integration-status">{noteIntegrationStatus}</p>}
               </div>
             </header>
 

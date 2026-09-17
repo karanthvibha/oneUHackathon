@@ -3,3 +3,14 @@ dist
 .DS_Store
 *.local
 .idea
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets — never commit credentials
+.env
+backend/.env

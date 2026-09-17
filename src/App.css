@@ -175,6 +175,14 @@ h1 {
   font-weight: 600;
 }
 
+.integration-status {
+  margin: 10px 0 0;
+  color: var(--coral-deep);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .stat {
   margin: 0;
   max-width: 240px;
@@ -672,16 +680,76 @@ textarea {
   width: min(820px, 100%);
 }
 
+.file-preview {
+  margin-top: 8px;
+}
+
+.file-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.file-preview-head h2 {
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.4rem;
+  font-weight: 650;
+}
+
+.pdf-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pdf-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pdf-status.pdf-error {
+  color: var(--coral-deep);
+}
+
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  max-height: 70vh;
+}
+
+.pdf-page {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  box-shadow: 0 1px 3px rgba(27, 36, 48, 0.16);
+}
+
+.pdf-canvas {
+  display: block;
+}
+
 .viewer-frame {
   width: 100%;
-  height: 65vh;
+  min-height: 420px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #fff;
 }
 
 .viewer-text {
-  max-height: 65vh;
+  max-height: none;
   margin: 0;
   padding: 16px;
   overflow: auto;
