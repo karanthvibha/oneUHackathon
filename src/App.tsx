@@ -1,5 +1,12 @@
-import { FormEvent, useMemo, useRef, useState, type DragEvent } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import './App.css'
+import {
+  deleteFileBlob,
+  loadFileBlob,
+  loadJSON,
+  saveFileBlob,
+  saveJSON,
+} from './persistence'
 
 type View = 'tutor' | 'plan' | 'notes' | 'files'
 
@@ -13,6 +20,7 @@ type Material = {
   folderId: string
   addedAt: string
   isStudyMaterial: boolean
+  lastReviewed?: string
   file?: File
 }
 type PlanItem = {
@@ -23,11 +31,21 @@ type PlanItem = {
   done: boolean
   materialId?: number
   date?: string
-  model?: string
+  kind?: 'study' | 'quiz'
 }
 
 const INBOX = 'inbox'
 const ALL = 'all'
+
+const DEFAULT_QUIZ_FREQUENCY_DAYS = 3
+
+const NOTES_STORE_KEY = 'lumen-notes'
+const FOLDERS_STORE_KEY = 'lumen-folders'
+const MATERIAL_FOLDERS_STORE_KEY = 'lumen-material-folders'
+const MATERIALS_STORE_KEY = 'lumen-materials'
+const PLAN_STORE_KEY = 'lumen-plan'
+
+type PersistedMaterial = Omit<Material, 'file'>
 
 const ALLOWED_FILE_EXTENSIONS = [
   'pdf',
@@ -74,39 +92,9 @@ const navItems: { id: View; label: string; hint: string; icon: string }[] = [
 
 const modelOptions = ['GPT-4o', 'Claude 3.5 Sonnet', 'Gemini 1.5 Pro', 'Llama 3.1 70B']
 
-const seedMaterialFolders: Folder[] = [
-  { id: INBOX, name: 'Inbox' },
-  { id: 'lectures', name: 'Lecture Notes' },
-  { id: 'slides', name: 'Slides' },
-  { id: 'readings', name: 'Readings' },
-]
+const seedMaterialFolders: Folder[] = [{ id: INBOX, name: 'Inbox' }]
 
-const seedMaterials: Material[] = [
-  {
-    id: 1,
-    name: 'Cell Biology — Week 3.pdf',
-    type: 'Lecture notes',
-    folderId: 'lectures',
-    addedAt: '2026-09-12T12:00:00',
-    isStudyMaterial: false,
-  },
-  {
-    id: 2,
-    name: 'Enzyme Kinetics.pptx',
-    type: 'Slides',
-    folderId: 'slides',
-    addedAt: '2026-09-13T12:00:00',
-    isStudyMaterial: false,
-  },
-  {
-    id: 3,
-    name: 'Metabolism Reading.pdf',
-    type: 'Reading',
-    folderId: 'readings',
-    addedAt: '2026-09-14T12:00:00',
-    isStudyMaterial: false,
-  },
-]
+const seedMaterials: Material[] = []
 
 const languages = [
   { value: 'es', label: 'Español' },
@@ -320,41 +308,11 @@ function simulateTranslation(text: string, lang: string) {
     .join('')
 }
 
-const seedFolders: Folder[] = [
-  { id: INBOX, name: 'Inbox' },
-  { id: 'biology', name: 'Biology' },
-  { id: 'stats', name: 'Stats' },
-  { id: 'language', name: 'Language' },
-]
+const seedFolders: Folder[] = [{ id: INBOX, name: 'Inbox' }]
 
-const seedNotes: Note[] = [
-  {
-    id: 1,
-    title: 'Photosynthesis, in one pass',
-    body: 'Light reactions split water; Calvin cycle fixes carbon. Rate limited by CO₂, light, and temperature.',
-    folderId: 'biology',
-  },
-  {
-    id: 2,
-    title: 'Bayes in practice',
-    body: 'Prior × likelihood → posterior. Update beliefs as evidence arrives; don’t treat p-values as the story.',
-    folderId: 'stats',
-  },
-  {
-    id: 3,
-    title: 'French irregulars',
-    body: 'être, avoir, aller, faire. Drill present tense first, then passé composé with être vs avoir.',
-    folderId: 'language',
-  },
-]
+const seedNotes: Note[] = []
 
-const seedPlanItems: PlanItem[] = [
-  { id: 'plan-1', day: 'Mon', title: 'Cell membranes', minutes: 45, done: true },
-  { id: 'plan-2', day: 'Tue', title: 'Enzyme kinetics', minutes: 50, done: true },
-  { id: 'plan-3', day: 'Wed', title: 'AI tutor quiz: metabolism', minutes: 30, done: false },
-  { id: 'plan-4', day: 'Thu', title: 'Smart notes review', minutes: 25, done: false },
-  { id: 'plan-5', day: 'Fri', title: 'Practice FRQs', minutes: 60, done: false },
-]
+const seedPlanItems: PlanItem[] = []
 
 function titleFromBody(text: string) {
   const line = text.trim().split('\n')[0] ?? 'Untitled note'
@@ -380,10 +338,6 @@ function previewKind(name: string) {
   return TEXT_PREVIEW_EXTENSIONS.has(ext) ? 'text' : 'embed'
 }
 
-function stripExtension(name: string) {
-  return name.replace(/\.[^/.]+$/, '')
-}
-
 function toDateInputValue(iso: string) {
   const d = new Date(iso)
   const year = d.getFullYear()
@@ -400,6 +354,11 @@ function formatDate(iso: string) {
   })
 }
 
+function formatPlanDate(iso: string) {
+  const d = new Date(`${iso}T12:00:00`)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 function formatIsoDate(d: Date) {
   const year = d.getFullYear()
   const month = String(d.getMonth() + 1).padStart(2, '0')
@@ -407,9 +366,16 @@ function formatIsoDate(d: Date) {
   return `${year}-${month}-${day}`
 }
 
-function formatPlanDate(iso: string) {
-  const d = new Date(`${iso}T12:00:00`)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+function formatRelative(iso: string) {
+  const then = new Date(iso)
+  const now = new Date()
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diffDays = Math.round((startOfDay(now) - startOfDay(then)) / 86400000)
+  if (diffDays <= 0) return 'today'
+  if (diffDays === 1) return 'yesterday'
+  if (diffDays < 7) return `${diffDays} days ago`
+  return `on ${then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 }
 
 function formatWeekRange(start: Date, end: Date) {
@@ -418,25 +384,19 @@ function formatWeekRange(start: Date, end: Date) {
   return `${fmt(start)} – ${fmt(end)}`
 }
 
-function buildQuizItemsForMaterial(material: Material): PlanItem[] {
-  const base = new Date(material.addedAt)
-  const occurrences = 8
-  const items: PlanItem[] = []
-  for (let i = 0; i < occurrences; i++) {
-    const date = new Date(base)
-    date.setDate(base.getDate() + 3 + i * 3)
-    items.push({
-      id: `quiz-${material.id}-${i}-${date.getTime()}`,
-      day: date.toLocaleDateString(undefined, { weekday: 'short' }),
-      title: `Quiz: ${stripExtension(material.name)}`,
-      minutes: 20,
-      done: false,
-      materialId: material.id,
-      date: formatIsoDate(date),
-      model: '',
-    })
+function makeQuizItemForMaterial(material: Material, due: Date = new Date()): PlanItem {
+  const d = new Date(due)
+  d.setHours(12, 0, 0, 0)
+  return {
+    id: `quiz-${material.id}-${d.getTime()}`,
+    day: d.toLocaleDateString(undefined, { weekday: 'short' }),
+    title: `Quiz: ${material.name}`,
+    minutes: 20,
+    done: false,
+    materialId: material.id,
+    date: formatIsoDate(d),
+    kind: 'quiz',
   }
-  return items
 }
 
 export default function App() {
@@ -451,8 +411,8 @@ export default function App() {
   const [draft, setDraft] = useState('')
   const [capture, setCapture] = useState('')
   const [captureStatus, setCaptureStatus] = useState('')
-  const [folders, setFolders] = useState<Folder[]>(seedFolders)
-  const [notes, setNotes] = useState<Note[]>(seedNotes)
+  const [folders, setFolders] = useState<Folder[]>(() => loadJSON(FOLDERS_STORE_KEY, seedFolders))
+  const [notes, setNotes] = useState<Note[]>(() => loadJSON(NOTES_STORE_KEY, seedNotes))
   const [query, setQuery] = useState('')
   const [noteTitle, setNoteTitle] = useState('')
   const [showNoteForm, setShowNoteForm] = useState(false)
@@ -462,9 +422,12 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [moveTarget, setMoveTarget] = useState(INBOX)
-  const [materialFolders, setMaterialFolders] = useState<Folder[]>(seedMaterialFolders)
+  const [materialFolders, setMaterialFolders] = useState<Folder[]>(() =>
+    loadJSON(MATERIAL_FOLDERS_STORE_KEY, seedMaterialFolders),
+  )
   const [materials, setMaterials] = useState<Material[]>(seedMaterials)
-  const [planItems, setPlanItems] = useState<PlanItem[]>(seedPlanItems)
+  const [materialsHydrated, setMaterialsHydrated] = useState(false)
+  const [planItems, setPlanItems] = useState<PlanItem[]>(() => loadJSON(PLAN_STORE_KEY, seedPlanItems))
   const [materialFolder, setMaterialFolder] = useState(ALL)
   const [materialFolderName, setMaterialFolderName] = useState('')
   const [showMaterialFolderForm, setShowMaterialFolderForm] = useState(false)
@@ -488,15 +451,71 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [tutorName, setTutorName] = useState<string>(() => localStorage.getItem('tutor-name') ?? 'Tutor')
   const [model, setModel] = useState<string>(() => localStorage.getItem('tutor-model') ?? modelOptions[0])
+  const [quizFrequencyDays, setQuizFrequencyDays] = useState<number>(() => {
+    const stored = Number(localStorage.getItem('tutor-quiz-frequency') ?? DEFAULT_QUIZ_FREQUENCY_DAYS)
+    return Number.isFinite(stored) && stored >= 1
+      ? Math.round(stored)
+      : DEFAULT_QUIZ_FREQUENCY_DAYS
+  })
   const [showSettings, setShowSettings] = useState(false)
   const [nameDraft, setNameDraft] = useState(tutorName)
   const [modelDraft, setModelDraft] = useState(model)
+  const [frequencyDraft, setFrequencyDraft] = useState(quizFrequencyDays)
   const [showTranslation, setShowTranslation] = useState<boolean>(
     () => localStorage.getItem('tutor-translate') === 'on',
   )
   const [targetLanguage, setTargetLanguage] = useState<string>(
     () => localStorage.getItem('tutor-lang') ?? 'es',
   )
+
+  // Hydrate persisted file blobs into material metadata.
+  useEffect(() => {
+    let cancelled = false
+    const stored = loadJSON<PersistedMaterial[]>(MATERIALS_STORE_KEY, [] as PersistedMaterial[])
+    Promise.all(
+      stored.map(async (m) => ({
+        ...m,
+        file: (await loadFileBlob(m.id)) ?? undefined,
+      })),
+    ).then((hydrated) => {
+      if (cancelled) return
+      setMaterials(hydrated)
+      setMaterialsHydrated(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    saveJSON(FOLDERS_STORE_KEY, folders)
+  }, [folders])
+
+  useEffect(() => {
+    saveJSON(NOTES_STORE_KEY, notes)
+  }, [notes])
+
+  useEffect(() => {
+    saveJSON(MATERIAL_FOLDERS_STORE_KEY, materialFolders)
+  }, [materialFolders])
+
+  useEffect(() => {
+    saveJSON(PLAN_STORE_KEY, planItems)
+  }, [planItems])
+
+  useEffect(() => {
+    if (!materialsHydrated) return
+    const metadata: PersistedMaterial[] = materials.map((m) => ({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      folderId: m.folderId,
+      addedAt: m.addedAt,
+      isStudyMaterial: m.isStudyMaterial,
+      lastReviewed: m.lastReviewed,
+    }))
+    saveJSON(MATERIALS_STORE_KEY, metadata)
+  }, [materials, materialsHydrated])
 
   const visibleNotes = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -651,6 +670,7 @@ export default function App() {
   function openSettings() {
     setNameDraft(tutorName)
     setModelDraft(model)
+    setFrequencyDraft(quizFrequencyDays)
     setShowSettings(true)
   }
 
@@ -662,6 +682,13 @@ export default function App() {
     setNameDraft(next)
     setModel(modelDraft)
     localStorage.setItem('tutor-model', modelDraft)
+    const freq =
+      Number.isFinite(frequencyDraft) && frequencyDraft >= 1
+        ? Math.round(frequencyDraft)
+        : DEFAULT_QUIZ_FREQUENCY_DAYS
+    setQuizFrequencyDays(freq)
+    localStorage.setItem('tutor-quiz-frequency', String(freq))
+    setFrequencyDraft(freq)
     setShowSettings(false)
   }
 
@@ -691,6 +718,7 @@ export default function App() {
   }
 
   function deleteMaterial(id: number) {
+    void deleteFileBlob(id)
     setMaterials((prev) => prev.filter((m) => m.id !== id))
     setSelectedMaterialIds((prev) => prev.filter((n) => n !== id))
     setMaterialMenuId(null)
@@ -717,6 +745,7 @@ export default function App() {
   }
 
   function deleteSelectedMaterials() {
+    selectedMaterialIds.forEach((id) => void deleteFileBlob(id))
     setMaterials((prev) => prev.filter((m) => !selectedMaterialIds.includes(m.id)))
     setSelectedMaterialIds([])
   }
@@ -747,8 +776,9 @@ export default function App() {
           minutes: 30,
           done: false,
           materialId: material.id,
+          kind: 'study',
         }
-        return [review, ...buildQuizItemsForMaterial(material)]
+        return [review, makeQuizItemForMaterial(material)]
       })
       setPlanItems((prev) => [...newItems, ...prev])
     }
@@ -790,6 +820,9 @@ export default function App() {
         file,
       }))
       setMaterials((prev) => [...newMaterials, ...prev])
+      newMaterials.forEach((material) => {
+        if (material.file) void saveFileBlob(material.id, material.file)
+      })
       setUploadDate('')
     }
 
@@ -834,16 +867,66 @@ export default function App() {
         prev.map((m) => (m.id === material.id ? { ...m, isStudyMaterial: true } : m)),
       )
       const day = new Date(material.addedAt).toLocaleDateString(undefined, { weekday: 'short' })
-      const item: PlanItem = {
+      const review: PlanItem = {
         id: `plan-${material.id}`,
         day,
         title: material.name,
         minutes: 30,
         done: false,
         materialId: material.id,
+        kind: 'study',
       }
-      setPlanItems((prev) => [item, ...buildQuizItemsForMaterial(material), ...prev])
+      setPlanItems((prev) => [review, makeQuizItemForMaterial(material), ...prev])
     }
+  }
+
+  function completePlanItem(item: PlanItem) {
+    if (item.kind === 'quiz' && item.materialId != null) {
+      const now = new Date()
+      const material = materials.find((m) => m.id === item.materialId)
+      setMaterials((prev) =>
+        prev.map((m) =>
+          m.id === item.materialId ? { ...m, lastReviewed: now.toISOString() } : m,
+        ),
+      )
+      if (material) {
+        const due = new Date(now)
+        due.setDate(due.getDate() + quizFrequencyDays)
+        const nextQuiz = makeQuizItemForMaterial(material, due)
+        setPlanItems((prev) => ([
+          ...prev.map((p) => (p.id === item.id ? { ...p, done: true } : p)),
+          nextQuiz,
+        ]))
+        return
+      }
+    }
+    setPlanItems((prev) =>
+      prev.map((p) => (p.id === item.id ? { ...p, done: true } : p)),
+    )
+  }
+
+  function snoozePlanItem(item: PlanItem) {
+    setPlanItems((prev) =>
+      prev.map((p) => {
+        if (p.id !== item.id) return p
+        const base = p.date ? new Date(`${p.date}T12:00:00`) : new Date()
+        base.setHours(12, 0, 0, 0)
+        base.setDate(base.getDate() + 1)
+        return {
+          ...p,
+          day: base.toLocaleDateString(undefined, { weekday: 'short' }),
+          date: formatIsoDate(base),
+          done: false,
+        }
+      }),
+    )
+  }
+
+  function lastReviewedLabel(item: PlanItem) {
+    if (item.materialId == null) return null
+    const material = materials.find((m) => m.id === item.materialId)
+    if (!material?.lastReviewed) return 'Never reviewed'
+    return `Last reviewed ${formatRelative(material.lastReviewed)}`
   }
 
   function openMaterialViewer(material: Material) {
@@ -851,7 +934,7 @@ export default function App() {
     setViewingMaterial(material)
     if (!material.file) {
       setViewUrl('')
-      setViewText('This sample file has no stored source to preview.')
+      setViewText('No stored source is available for this file.')
       return
     }
     if (previewKind(material.name) === 'text') {
@@ -1112,6 +1195,15 @@ export default function App() {
                     </option>
                   ))}
                 </select>
+                <label htmlFor="tutor-quiz-frequency">Quiz frequency (days)</label>
+                <input
+                  id="tutor-quiz-frequency"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={frequencyDraft}
+                  onChange={(e) => setFrequencyDraft(Number(e.target.value))}
+                />
                 <div className="settings-actions">
                   <button
                     className="btn btn-ghost"
@@ -1214,21 +1306,42 @@ export default function App() {
               </div>
               <p className="stat">
                 {doneCount} of {visiblePlanItems.length} sessions done
-                <span>Keep Wednesday light if the quiz feels shaky.</span>
+                <span>Space out heavier sessions across the week.</span>
               </p>
             </header>
             <ol className="plan">
               {visiblePlanItems.map((item) => (
                 <li key={item.id} className={item.done ? 'done' : undefined}>
                   <span className="day">{item.day}</span>
-                  <div>
+                  <div className="plan-body">
                     <strong>{item.title}</strong>
                     <p>
                       {item.minutes} min
                       {item.date ? ` · ${formatPlanDate(item.date)}` : ''}
                     </p>
+                    {lastReviewedLabel(item) && (
+                      <p className="last-reviewed">{lastReviewedLabel(item)}</p>
+                    )}
                   </div>
-                  <em>{item.done ? 'Done' : 'Up next'}</em>
+                  <div className="plan-actions">
+                    {item.kind === 'quiz' && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        type="button"
+                        onClick={() => snoozePlanItem(item)}
+                      >
+                        Snooze
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-primary btn-sm"
+                      type="button"
+                      onClick={() => completePlanItem(item)}
+                      disabled={item.done}
+                    >
+                      {item.done ? 'Done' : 'Mark done'}
+                    </button>
+                  </div>
                 </li>
               ))}
               {visiblePlanItems.length === 0 && <p className="empty">No study sessions planned yet.</p>}

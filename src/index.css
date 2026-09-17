@@ -5,8 +5,8 @@
   --paper-2: #fffaf3;
   --line: #e4d8c8;
   --muted: #6d645a;
-  --coral: #e07a5f;
-  --coral-deep: #c45d44;
+  --coral: #e05a5a;
+  --coral-deep: #c43d3d;
   --sage: #3d6b5a;
   --gold: #c9a227;
   --shadow: 0 18px 50px rgba(27, 36, 48, 0.12);
@@ -33,7 +33,7 @@ body,
 
 body {
   background:
-    radial-gradient(1200px 500px at 90% -10%, #f3d9c4 0%, transparent 55%),
+    radial-gradient(1200px 500px at 90% -10%, #f3d0d0 0%, transparent 55%),
     var(--paper);
 }
 

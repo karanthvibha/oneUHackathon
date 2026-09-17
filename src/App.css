@@ -461,7 +461,7 @@ textarea {
 }
 
 .btn-danger {
-  background: #f3d4cb;
+  background: #f3cdcd;
   color: var(--coral-deep);
 }
 
@@ -615,7 +615,7 @@ textarea {
 
 .dropzone.active {
   border-color: var(--coral);
-  background: #fff1e9;
+  background: #ffecec;
 }
 
 .dropzone p {
@@ -760,7 +760,7 @@ textarea {
 }
 
 .material-menu button.danger:hover {
-  background: #f3d4cb;
+  background: #f3cdcd;
 }
 
 .material-top {
@@ -908,7 +908,7 @@ textarea {
 
 .folder.drop-over {
   outline: 2px dashed var(--coral);
-  background: #fff1e9;
+  background: #ffecec;
 }
 
 .folder-create {
@@ -975,7 +975,7 @@ textarea {
   padding: 6px 10px;
   border: 0;
   border-radius: 999px;
-  background: #f3d4cb;
+  background: #f3cdcd;
   color: var(--coral-deep);
   font-size: 0.78rem;
   font-weight: 700;
@@ -1060,6 +1060,26 @@ textarea {
   color: var(--muted);
   font-style: normal;
   font-size: 0.92rem;
+}
+
+.plan .last-reviewed {
+  margin-top: 8px;
+  color: var(--coral-deep);
+  font-weight: 600;
+}
+
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border-radius: 12px;
 }
 
 .notes {
